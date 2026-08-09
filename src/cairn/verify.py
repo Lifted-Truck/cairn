@@ -21,6 +21,7 @@ to the audit log at M3.
 
 from __future__ import annotations
 
+import datetime
 import math
 import re
 from collections import Counter
@@ -168,6 +169,20 @@ _OPS = {
     "divide": lambda xs: xs[0] / xs[1],
     "ratio": lambda xs: xs[0] / xs[1],
     "percent_change": lambda xs: (xs[0] - xs[1]) / xs[1] * 100,
+    # VER-1 additions. Each stays a pure recomputation from CITED operands — the result
+    # is declared and recomputed, never itself cited (D9).
+    "percent": lambda xs: xs[0] / xs[1] * 100,      # x as a percentage OF y
+    "min": min,
+    "max": max,
+    "average": lambda xs: sum(xs) / len(xs),
+    # `count` counts the operands the agent CITED, which is the honest reading: it is a
+    # claim about the evidence assembled, not a search of the document. An incomplete
+    # citation set yields a wrong count, and that is visible — the operands are listed.
+    "count": lambda xs: float(len(xs)),
+    # `round` is identity here: the tolerance comparison below already rounds the
+    # recomputation to the precision the agent wrote, so asserting "approximately 12.4"
+    # from 12.437 verifies without a second rounding rule to keep in step.
+    "round": lambda xs: xs[0],
 }
 
 # Relational checks (D19): each recomputes a NUMERIC relation between cited operands
@@ -185,9 +200,50 @@ _BOOL_OPS = {
 }
 _REL_SYMBOL = {"gt": " > ", "ge": " ≥ ", "lt": " < ", "le": " ≤ ", "eq": " = "}
 
+# Date arithmetic (VER-1). Separate from `_OPS` because the operands are DATES, and
+# `to_number` would reject them — so these dispatch before any numeric parsing.
+#
+# **Boundary (D10), and it is a sharp one here.** A duration is not a term. `date_delta`
+# returns the number of days between two cited dates and nothing more: patent term
+# involves adjustments, extensions, terminal disclaimers and maintenance status, none of
+# which are arithmetic. Computing 7,300 days between two dates is evidence; calling it
+# "the patent expires in 2033" is adjudication, and the tool refuses that rather than
+# deriving it.
+_DATE_OPS = {
+    "date_delta": lambda ds: float((ds[0] - ds[1]).days),
+}
+
+# Full names AND the conventional abbreviations, matched WHOLE. An earlier cut truncated
+# the month to three characters, which made "Septober 4, 2024" a valid September date —
+# a parser that accepts a string nobody wrote is worse than one that rejects a date
+# somebody did, because the first fails silently.
+_MONTHS: dict[str, int] = {}
+for _i, _full in enumerate(
+        ["january", "february", "march", "april", "may", "june",
+         "july", "august", "september", "october", "november", "december"], start=1):
+    _MONTHS[_full] = _i
+    _MONTHS[_full[:3]] = _i
+_MONTHS["sept"] = 9
+
+
+def to_date(text: str) -> datetime.date:
+    """Parse a cited date literal ("September 28, 2024") to a date.
+
+    Deliberately narrow: it accepts the shape `_DATE` already recognises as a salient
+    atom, so anything `verify` treats as a bindable date is exactly what this parses. A
+    looser parser would accept strings the rest of the system does not consider dates.
+    """
+    m = re.match(r"\s*([A-Za-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})\s*$", text)
+    if not m:
+        raise ValueError(f"not a date literal: {text!r}")
+    mon = _MONTHS.get(m.group(1).lower())
+    if mon is None:
+        raise ValueError(f"unknown month in {text!r}")
+    return datetime.date(int(m.group(3)), mon, int(m.group(2)))
+
 # Version of the derived-operation set (D18/D19); stamped into records (TC-2) and
 # bumped when the set changes, so a derivation's record says which ops verified it.
-OPS_VERSION = "1"
+OPS_VERSION = "2"   # VER-1 widened the set (D59)
 
 
 def _parse_bool(text: str) -> bool:
@@ -288,6 +344,13 @@ def verify(answer: Answer, store: SpanStore) -> VerifyResult:
                 derived_ok.append(False)
                 continue
             try:
+                if d.operation in _DATE_OPS:
+                    # Dates first: `to_number` would reject them, so numeric parsing
+                    # cannot come before this branch.
+                    dates = [to_date(o.text) for o in d.operands]
+                    got = _DATE_OPS[d.operation](dates)
+                    derived_ok.append(abs(got - to_number(d.text)) < 1e-9)
+                    continue
                 nums = [to_number(o.text) for o in d.operands]
                 if d.operation in _OPS:
                     # Numeric (D18): match the recompute to the asserted result at the

@@ -232,3 +232,91 @@ def test_a_figure_asserted_twice_needs_two_bindings():
 
     once = Sentence("Assets were 364,980 million.", atoms=[b])
     assert verify(Answer([once]), store).ok    # the ordinary case is unaffected
+
+
+def _mini():
+    """A tiny corpus plus a binder, for the VER-1 operation tests (D59)."""
+    from cairn.ingest.document import make_document
+    from cairn.spans import SpanStore
+    from cairn.verify import AtomBinding
+    text = ("Revenue was 391,035 in FY2024 and 383,285 in FY2023. The filing is dated "
+            "September 28, 2024 and the prior one September 30, 2023.")
+    store = SpanStore([make_document("D", text)])
+
+    def bind(lit):
+        i = text.index(lit)
+        return AtomBinding(lit, "D", i, i + len(lit))
+    return store, bind
+
+
+def _derives(store, bind, op, result, operands, prose=None):
+    from cairn.verify import Answer, DerivedAtom, Sentence, verify
+    atoms = [bind(o) for o in operands]
+    d = DerivedAtom(result, op, atoms)
+    s = Sentence(prose or f"The value is {result}.", atoms=atoms, derived=[d])
+    return verify(Answer([s]), store).ok
+
+
+@pytest.mark.parametrize(("op", "result", "operands"), [
+    ("percent", "102.02", ["391,035", "383,285"]),
+    ("max", "391,035", ["391,035", "383,285"]),
+    ("min", "383,285", ["391,035", "383,285"]),
+    ("average", "387,160", ["391,035", "383,285"]),
+    ("count", "2", ["391,035", "383,285"]),
+])
+def test_ver1_operations_recompute_from_cited_operands(op, result, operands):
+    """D59: each new operation is a pure recomputation from operands that are themselves
+    bound to spans. The result is declared and recomputed, never cited (D9)."""
+    store, bind = _mini()
+    assert _derives(store, bind, op, result, operands)
+
+
+@pytest.mark.parametrize(("op", "wrong", "operands"), [
+    ("percent", "150.00", ["391,035", "383,285"]),
+    ("max", "383,285", ["391,035", "383,285"]),
+    ("average", "400,000", ["391,035", "383,285"]),
+    ("count", "5", ["391,035", "383,285"]),
+])
+def test_ver1_operations_reject_a_wrong_result(op, wrong, operands):
+    """The half that matters: an operation that cannot fail is not verifying anything."""
+    store, bind = _mini()
+    assert not _derives(store, bind, op, wrong, operands)
+
+
+def test_date_delta_verifies_and_rejects():
+    """Dates dispatch BEFORE numeric parsing — `to_number` would reject a date literal,
+    so a date operand must never reach it."""
+    store, bind = _mini()
+    dates = ["September 28, 2024", "September 30, 2023"]
+    assert _derives(store, bind, "date_delta", "364", dates,
+                    prose="There are 364 days between them.")
+    assert not _derives(store, bind, "date_delta", "500", dates,
+                        prose="There are 500 days between them.")
+
+
+def test_a_duration_is_not_a_term():
+    """D10, sharply. `date_delta` returns days and nothing more. Patent term involves
+    adjustments, extensions, terminal disclaimers and maintenance status — none of them
+    arithmetic — so the operation set offers no way to compute one. This test exists so
+    that adding `patent_term` (or any adjudication-shaped operation) fails loudly rather
+    than arriving quietly in a later commit."""
+    from cairn.verify import _BOOL_OPS, _DATE_OPS, _OPS
+    forbidden = {"patent_term", "expiry", "expiration", "term", "validity", "novelty",
+                 "obviousness", "infringement", "scope", "prior_art"}
+    offered = set(_OPS) | set(_BOOL_OPS) | set(_DATE_OPS)
+    assert not (offered & forbidden), (
+        f"an adjudication-shaped operation was added: {sorted(offered & forbidden)}. "
+        f"Cairn locates and evidences; it does not conclude (D10).")
+
+
+def test_to_date_accepts_only_what_verify_treats_as_a_date():
+    """A looser parser would accept strings the rest of the system does not consider
+    dates, so the two must agree on what a date literal is."""
+    import datetime
+
+    from cairn.verify import to_date
+    assert to_date("September 28, 2024") == datetime.date(2024, 9, 28)
+    assert to_date("Sep. 28, 2024") == datetime.date(2024, 9, 28)
+    for bad in ("2024-09-28", "28 September 2024", "Septober 4, 2024", "391,035"):
+        with pytest.raises(ValueError):
+            to_date(bad)
