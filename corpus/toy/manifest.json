@@ -1,5 +1,5 @@
 {
-  "_note": "M0 toy corpus (ROADMAP M0-T2). Verbatim excerpts from a single EDGAR filing, sliced from the M1 adapter's canonical normalization (attest.ingest.edgar). Rebuild: python scripts/build_toy_corpus.py",
+  "_note": "M0 toy corpus (ROADMAP M0-T2). Verbatim excerpts from a single EDGAR filing, sliced from the M1 adapter's canonical normalization (cairn.ingest.edgar). Rebuild: python scripts/build_toy_corpus.py",
   "schema_version": "0.1.0",
   "source": {
     "doc_id": "AAPL-10K-FY2024",

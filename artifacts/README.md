@@ -6,6 +6,13 @@ where one disagrees with `ROADMAP.md`, the roadmap wins.
 
 Open any of them directly in a browser; none needs a server or a network connection.
 
+**On the old name.** Artifacts written before the D40 rename were updated to say *Cairn*,
+because they describe our own mechanisms and carry no external factual claims. The two
+research reports in [`../docs/`](../docs/) are the deliberate exception and still say
+*ATTEST* throughout: their trademark findings are facts about the *ATTEST* mark, and a
+mechanical rename fabricated "YOUCAIRN" and "cosign cairn" before it was caught. The test
+is whether the old name is load-bearing evidence or just stale.
+
 ## Product & status
 
 | File | What it is |
