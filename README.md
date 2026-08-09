@@ -229,5 +229,5 @@ TBD.
 
 ---
 
-*Last verified against the code on **2026-07-28** — 271 Layer-0 tests, 47 logged decisions,
-6 MCP tools. Where this README and [`ROADMAP.md`](ROADMAP.md) disagree, the roadmap wins.*
+*Last verified: 2026-07-28 — 324 Layer-0 tests, 58 logged decisions, 6 MCP tools.
+Where this README and [`ROADMAP.md`](ROADMAP.md) disagree, the roadmap wins.*
