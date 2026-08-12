@@ -80,3 +80,58 @@ def test_recall_on_answerable_golden(store, golden):
     )
     # All but the known auditor lexical gap (G009) should surface in the candidate set.
     assert recall20 >= len(answerable) - 1, f"recall@20 {recall20}/{len(answerable)} too low"
+
+
+def test_the_backend_contract_holds_for_the_shipped_backend():
+    """D60: the four obligations on `RetrievalBackend` are a written contract, so the one
+    backend that exists must demonstrably meet them — otherwise the contract is
+    aspiration, and a future backend inherits an unmet example."""
+    from cairn.ingest.document import make_document
+    from cairn.retrieval import Retriever
+    from cairn.spans import SpanStore
+
+    store = SpanStore([make_document(
+        "D", "Total assets were 364,980. Total liabilities were 308,030. "
+             "Revenue was 391,035 for the fiscal year.")])
+    r = Retriever(store)
+
+    # 1. Deterministic ranking — same corpus + query, byte-identical order.
+    a = [(h.span.span_id, h.score) for h in r.search("total assets", 10)]
+    b = [(h.span.span_id, h.score) for h in Retriever(store).search("total assets", 10)]
+    assert a == b
+
+    # 3. `name` is a provenance tag and is actually populated.
+    assert r.method == "bm25"
+    assert getattr(r.backend, "name", None) == "bm25"
+
+    # 4. No decision: a WEAK match is still returned, and the floor decides. The
+    #    distinction this pins is narrow and was got wrong once: returning nothing
+    #    because no term appears is zero signal (honest); returning nothing because the
+    #    score looked low would be the backend pre-empting check_support.
+    weak = r.search("total churn rate", 10)          # one term overlaps: weak, not absent
+    assert weak, "a weak match must survive — sufficiency is check_support's call"
+    assert weak[0].score < 1.0, "and it really is weak"
+    assert all(hasattr(h, "score") for h in weak)
+    assert r.search("zzzz qqqq", 10) == [], "no overlap at all is zero signal, not a filter"
+
+
+def test_retrieval_cannot_produce_a_wrong_citation():
+    """The asymmetry that makes relaxing I6 safe at retrieval and nowhere else: whatever
+    retrieval returns, `verify` re-checks the span against the document and its hash. A
+    bad backend degrades the ANSWER; it cannot fabricate a citation."""
+    from cairn.ingest.document import make_document
+    from cairn.spans import SpanStore
+    from cairn.verify import Answer, AtomBinding, Sentence, verify
+
+    text = "Total assets were 364,980 million."
+    store = SpanStore([make_document("D", text)])
+    i = text.index("364,980")
+
+    good = Sentence("Assets were 364,980 million.",
+                    atoms=[AtomBinding("364,980", "D", i, i + 7)])
+    assert verify(Answer([good]), store).ok
+
+    # However a span was found, a binding that does not hold at its offsets fails.
+    bad = Sentence("Assets were 364,980 million.",
+                   atoms=[AtomBinding("364,980", "D", 0, 7)])
+    assert not verify(Answer([bad]), store).ok

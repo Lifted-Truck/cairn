@@ -33,7 +33,7 @@ Everything below is the machinery that makes that guarantee real and checkable.
 | **I3 — verified immutability** | content-hash at ingest; any span/hash drift is a hard failure | content-hash + `verify` hash check | runtime + Layer-0 | **hard** |
 | **I4 — read/write asymmetry** | the corpus is read-only; the only writable surface is the audit log | structural (only write tools hold the log) | runtime + Layer-0 | **hard** |
 | **I5 — append-only audit** | every interaction logged immutably and replayably | `AuditLog` (hash-chained) | runtime + Layer-0 | **hard** |
-| **I6 — deterministic evidence** | same corpus + query → reproducible results; no runtime model calls | seeded/temperature-0 evidence path | runtime + Layer-0 | **hard** |
+| **I6 — deterministic evidence** | same corpus + query → reproducible results; **no model on the deciding path** (see I6 note, contract 2.0) | seeded/temperature-0 evidence path | runtime + Layer-0 | **hard** |
 | **Outcome honesty (D16, D22)** | answer / abstain / **correction** / **partial** / **refuse** — a false premise is refuted with evidence; a legal conclusion is declined *as its own outcome*, never blurred into abstention | agent + `verify(outcome=…)`; `refuse` rendered + scored first-class | runtime; Layer-E | **hard** (present/abstain decision); **measured** (correctness, `refusal_accuracy`) |
 | **Constraint coverage (D13, v1.2)** | when a frame is supplied, a presented answer's cited evidence **covers every required question constraint** (subject + attribute + qualifiers — the connecting clause), not merely the answer token | `verify(frame=…)` → deterministic `check_coverage` over the cited spans; loop presents only if `ok AND coverage.complete`; frame + coverage logged (I5, replayable) | runtime (deterministic flag + loop rule); Layer-E (adherence + the residuals) | **hard** (flag); **measured** (adherence; negation/attachment/coreference remain Layer-E) |
 | **Locate-never-adjudicate (D10)** | patent domain: surface & evidence; never conclude novelty/validity/infringement/claim-construction — expressed as the first-class **refuse** outcome (D22) | agent refusal class + design | runtime; Layer-E negative test | **hard** (boundary); **measured** (adherence) |
@@ -54,6 +54,45 @@ strengthen as research arrives (toward runtime entailment-gating; see Backlog v2
 - **Layer-E** — periodic, model-in-the-loop, **measured not gated** (entailment,
   abstention calibration, adjudication-refusal). This is where rigor is *quantified*.
 
+### I6 as amended — contract 2.0 (D60)
+
+I6 read *"no runtime model calls"*. That literal form was never the guarantee anyone
+needed; it was a proxy for the guarantee, and it forbade a class of work — embedding-based
+retrieval — for a reason that does not apply to it. The amended form:
+
+> Same corpus + query → reproducible results. **No model may sit on the deciding path.**
+> Retrieval *may* embed a query with a pinned model, because retrieval proposes and never
+> decides.
+
+**What "deciding path" means, exactly.** Everything downstream of retrieval:
+`check_support`'s floor comparison, `verify`'s span resolution and hash check, coverage,
+and every outcome class. None of those may call a model, then or now. Retrieval's job is
+to *propose candidates*; the decisions are made over the candidates it returns, by pure
+functions, from spans that are hash-verified either way. A wrong retrieval yields a worse
+answer or an abstention — never a wrong citation, because `verify` re-checks the span
+regardless of how it was found.
+
+**Why this is a WEAKENING and versioned as one.** The old form was checkable by grep: no
+model calls, anywhere, full stop. The new one requires judgment about what counts as
+deciding, and judgment is weaker than a syntactic rule. That is a real reduction in how
+cheaply the claim can be audited, so it takes a major version rather than a quiet edit —
+even though no guarantee about *output* changes.
+
+**Two conditions, both learned the hard way.**
+
+1. **Document embeddings are ingestion-time and frozen**, exactly as OCR is (D28). They
+   are computed once, hashed into a manifest, and never recomputed at answer time. Only
+   the *query* embedding happens at runtime.
+2. **The model is pinned and recorded in provenance.** An embedding model has the same
+   version-drift problem OCR does — the same input can embed differently across model
+   versions, runtimes and hardware. D45 found the OCR version of this the expensive way.
+   So a record says which embedding model produced it, and a changed model makes prior
+   records stale rather than silently incomparable.
+
+**What did not change.** `verified ≠ entailed`. The five outcome classes. Span-level
+provenance. The hash chain. Abstention over fabrication. A model still never decides
+whether evidence supports a claim.
+
 ## Versioning + the monotonic rule (D21)
 
 The contract is **monotonic**: rigor may **strengthen** freely (a strengthening is a
@@ -66,6 +105,8 @@ weakening."
   abstention) that don't reduce any guarantee.
 - `2.0` — a structural change to what is guaranteed (e.g., entailment becomes
   runtime-gated, or a guarantee is relaxed) — logged and ratified.
+  **Reached 2026-08-09 (D60):** I6's literal "no runtime model calls" relaxed to "no model
+  on the deciding path", ratified by Julian, with the two conditions above.
 
 ## The upgrade ratchet (how new rigor is adopted)
 

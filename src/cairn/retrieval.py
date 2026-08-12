@@ -8,7 +8,8 @@ same interface and fused (e.g. reciprocal-rank fusion) without touching callers
 Determinism (I6): BM25 is a pure function of the corpus + query; equal-scoring
 spans are tie-broken by `span_id`, so the same corpus + query yields byte-identical
 rankings across runs. No randomness, hence nothing to seed; an embedding backend
-*would* need a pinned model + cached vectors to preserve this.
+*would* need a pinned model + cached vectors to preserve this — the obligations are
+written out on `RetrievalBackend` (D60).
 
 Corpus-agnostic and multi-document by construction (the patent track reuses it).
 """
@@ -60,6 +61,45 @@ class Hit:
 
 
 class RetrievalBackend(Protocol):
+    """What any retrieval backend must satisfy (D60, contract 2.0).
+
+    The seam is deliberately tiny — propose candidates, return ranked hits — because
+    retrieval **proposes and never decides**. Everything that decides sits downstream and
+    is a pure function: the support floor, `verify`'s span resolution and hash check,
+    coverage, the outcome classes. A wrong retrieval yields a worse answer or an
+    abstention; it cannot yield a wrong citation, because `verify` re-checks the span
+    however it was found. That asymmetry is what makes it safe to relax I6 here and
+    nowhere else.
+
+    Four obligations, none of them optional:
+
+    1. **Deterministic ranking.** Same corpus + query → byte-identical order. BM25 gets
+       this free and tie-breaks equal scores by `span_id`; an embedding backend needs a
+       pinned model *and* cached vectors, because float non-determinism across runtimes
+       would otherwise reorder ties invisibly.
+    2. **Document-side artifacts are ingestion-time and frozen.** Embeddings for the
+       corpus are computed once, hashed into a manifest, and never recomputed at answer
+       time — exactly the discipline OCR is held to (D28). Only the *query* side may run
+       at retrieval time.
+    3. **`name` is a provenance tag** (TC-2) and must change when anything that could
+       change results changes — the model, its version, the fusion weights. A record that
+       says `bm25` when an embedding backend answered it is a lie in the audit log, and
+       D45 showed how expensive an unrecorded version change is.
+    4. **No decision.** A backend returns candidates and scores. It does not decide
+       support, does not abstain, and must apply **no relevance threshold of its own** —
+       ranking is its job, sufficiency is `check_support`'s. The distinction is narrow but
+       real: returning nothing because no query term appears anywhere is *zero signal*,
+       which is honest; returning nothing because the best score looked too low is a
+       decision, and it would silently pre-empt the floor that the calibration record
+       exists to make auditable.
+
+    Nothing beyond BM25 is built. This documents the levers so a future backend meets a
+    written contract rather than an inferred one (RAG Decision 2, move A).
+    """
+
+    #: Provenance tag recorded on every interaction — see obligation 3.
+    name: str
+
     def search(self, query: str, k: int) -> list[Hit]: ...
 
 

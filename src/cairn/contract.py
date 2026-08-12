@@ -12,4 +12,9 @@ major for a structural change to what is guaranteed.
 # 1.1 (2026-06-30, D22): outcome honesty refined — refuse-to-adjudicate becomes a
 #     first-class fifth outcome, distinct from abstain. Strengthening → minor bump.
 # 1.0 (2026-06-29, D21): initial declaration.
-CONTRACT_VERSION = "1.2"
+# 2.0 (D60): I6's literal "no runtime model calls" relaxed to "no model on the DECIDING
+# path" — retrieval may embed a query with a pinned model, because retrieval proposes and
+# never decides. Versioned as a major bump because the old form was checkable by grep and
+# the new one takes judgment: a real reduction in auditability, even though no guarantee
+# about output moved. See docs/truth_contract.md "I6 as amended".
+CONTRACT_VERSION = "2.0"
