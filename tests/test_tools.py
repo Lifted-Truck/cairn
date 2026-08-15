@@ -236,7 +236,7 @@ def test_verify_without_frame_is_unchanged(registry):
     assert out["ok"] is True and "coverage" not in out
 
 
-TOOL_MANIFEST_SHA256 = "35f4051c71f1b50c8932d76c27a729637315815de4f101944391d0a660085144"
+TOOL_MANIFEST_SHA256 = "01ff819a161d557c2248f4a63002b6d5f488210580c51c642d1fd299e36e5751"
 
 
 def _registry(tmp_path):

@@ -178,9 +178,10 @@ def test_interactions_from_audit_rebuilds_presented(store):
          "status": "insufficient"},  # abstain → dropped from the view
     ]
     inters = interactions_from_audit(entries, store)
-    assert len(inters) == 1                                   # only the presented one
+    assert [i.kind for i in inters] == ["answer", "abstain"]   # the abstention renders too
     assert inters[0].question == "What were Apple's total assets?"  # the record's OWN frame
     assert inters[0].verify is not None and inters[0].verify.ok    # verify re-run, resolves
+    assert inters[1].question == "CEO pay?"
 
 
 def test_the_question_comes_from_the_record_never_from_a_neighbour(store):
@@ -395,3 +396,38 @@ def test_no_cue_no_advisory(store):
     """Benign citations stay clean — no advisory noise on the normal path."""
     html = render_evidence_view([_clean(store)], store)
     assert "denial/correction cue" not in html
+
+
+def test_an_abstention_is_an_outcome_and_reaches_the_page(store):
+    """D67: the view rendered only `verify(ok)` records, so every abstention vanished.
+
+    A session where Cairn correctly declined four of ten questions rendered as six
+    answers and no trace of a decline — which reads as a tool that always answers, the
+    opposite of what it claims. Abstention is the product, not an absence of output.
+    """
+    from cairn.evidence_view import interactions_from_audit
+    entries = [{"kind": "check_support", "query": "What is Apple's customer churn rate?",
+                "status": "insufficient", "provenance": {"threshold": 15.0}}]
+    inters = interactions_from_audit(entries, store)
+    assert [i.kind for i in inters] == ["abstain"]
+    assert inters[0].closest, "an abstention must show where it looked"
+    html = render_evidence_view(inters, store)
+    assert '<span class="badge abstain">' in html
+    assert "score" in html                       # the closest spans, with their scores
+
+
+def test_a_refusal_keeps_its_located_evidence(store):
+    """D22 + D67: "locate first, then decline". A refusal presents no conclusion but does
+    CITE, so it lights the document and lists what it found — an empty refusal spends the
+    boundary and still leaves the professional to run the search."""
+    ans = Answer([Sentence("Claim 1 recites a separator; the cited prior art describes a filter.",
+                           atoms=[_bind(store, "364,980", TOTAL_ASSETS)])])
+    inter = Interaction("Is claim 1 novel over the cited art?", "refuse",
+                        answer=ans, verify=verify(ans, store),
+                        reason="Located the evidence; the legal conclusion is a "
+                               "professional's to draw (D10).")
+    html = render_evidence_view([inter], store)
+    assert '<span class="badge refuse">' in html
+    assert '<span class="badge answer">' not in html          # no conclusion presented
+    assert "What Cairn located" in html                        # …but the evidence is there
+    assert 'class="m k-fig"' in html, "a refusal still lights its cited spans"

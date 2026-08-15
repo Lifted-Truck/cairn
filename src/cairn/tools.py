@@ -307,9 +307,15 @@ def default_registry(
     reg("verify", "Resolve every bound atom + recompute derivations; flag unbound figures (I1/D9).",
         _verify, _obj({
             "answer": _ANSWER_SCHEMA,
-            "outcome": {"type": "string", "enum": ["answer", "correction", "partial"],
-                        "description": "Outcome class (D16) — for review; correction = "
-                                       "grounded refutation of a false premise."},
+            # `refuse` (D22) belongs here even though it presents no conclusion: the
+            # locate-first rule means a refusal still CITES what it found, and without
+            # this it could not be logged at all — the boundary that most distinguishes
+            # Cairn from a chatbot was the one outcome absent from the record (D67).
+            "outcome": {"type": "string",
+                        "enum": ["answer", "correction", "partial", "refuse"],
+                        "description": "Outcome class (D16/D22) — for review; correction "
+                                       "= grounded refutation of a false premise; refuse "
+                                       "= evidence located, legal conclusion declined."},
             "frame": {
                 "type": "object",
                 "description": "Question frame (D13/M2-T8): the query decomposed into "

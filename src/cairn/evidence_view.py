@@ -55,9 +55,14 @@ class Interaction:
     figures: list[str] = field(default_factory=list)  # FigurePanel labels to surface (RT-4)
 
 
-# Outcome classes that PRESENT something (D16) — they get cited-span highlights and
-# the answer-style card; only `abstain` stays silent.
+# Outcome classes that PRESENT a conclusion (D16) — they get the answer-style card.
 _PRESENTS = {"answer", "correction", "partial"}
+
+# Classes that CITE located spans, and so light the document. `refuse` (D22) presents no
+# conclusion but does cite: locate-first means a refusal hands over what it found, and a
+# refusal with its evidence hidden wastes the boundary — the professional still has to
+# run the search. Presenting and citing are different things, and only here do they part.
+_CITES = _PRESENTS | {"refuse"}
 
 # An answer whose citations no longer resolve. Not one of D16's outcome classes: the
 # agent never chose it, the corpus decided it. Deliberately OUTSIDE _PRESENTS, so it
@@ -78,7 +83,7 @@ def _withhold_unverified(interactions: list[Interaction]) -> list[Interaction]:
     """
     out = []
     for inter in interactions:
-        if inter.kind in _PRESENTS and inter.verify is not None and not inter.verify.ok:
+        if inter.kind in _CITES and inter.verify is not None and not inter.verify.ok:
             inter = replace(inter, kind=_WITHHELD)
         out.append(inter)
     return out
@@ -89,7 +94,8 @@ def interactions_from_audit(entries: list[dict], store: SpanStore) -> list[Inter
 
     The bridge from a live Claude Code / Desktop session to the review GUI: each
     `verify(ok)` record becomes a card. `verify` is re-run (deterministic) so the view
-    reflects the current corpus. Abstentions (no `verify ok`) are not rendered.
+    reflects the current corpus. Abstentions and refusals render too (D67) —
+    dropping them made a tool that declines look like one that always answers.
 
     The question comes from the record's **own** `frame.question` (D13), never from a
     neighbouring record. Carrying the last `check_support` query forward was wrong on
@@ -98,26 +104,65 @@ def interactions_from_audit(entries: list[dict], store: SpanStore) -> list[Inter
     `question` variable that survives the loop iteration outlives the record it came
     from. A search query is not a question, and proximity in a log is not attribution.
     """
+    from .retrieval import Retriever
+    from .support import check_support
+
     out: list[Interaction] = []
     sup_prov: dict = {}
     last_query = None
+    retriever: Retriever | None = None
     for e in entries:
         kind = e.get("kind")
         if kind in ("check_support", "check_claim"):
             last_query = e.get("query") or e.get("claim") or last_query
             sup_prov = e.get("provenance", {}) or sup_prov
+            if e.get("status") == "insufficient":
+                # An abstention IS an outcome, and the view used to drop it — so a log
+                # of ten questions where Cairn correctly declined four rendered as six
+                # answers and no evidence it had ever declined anything. That reads as a
+                # tool that always answers, which is the opposite of the claim (D67).
+                # The closest spans are re-derived rather than resolved from the logged
+                # span_ids: retrieval is deterministic (I6), so re-running reproduces
+                # them exactly, and it keeps this path off a second lookup table.
+                retriever = retriever or Retriever(store)
+                res = check_support(last_query, retriever,
+                                    threshold=(e.get("provenance") or {}).get("threshold")
+                                    or _DEFAULT_FLOOR)
+                out.append(Interaction(
+                    question=last_query or "(question not in log)",
+                    kind="abstain",
+                    reason="Cairn abstained: no span in this corpus cleared the support "
+                           "floor for this question. The closest passages it found are "
+                           "listed, so you can see where it looked and judge the call.",
+                    closest=list(res.closest),
+                    note="Reconstructed from the audit log (I5) — a real logged session.",
+                    trace=_provenance_line({}, e.get("provenance", {}) or {}),
+                ))
         elif kind == "verify" and e.get("ok") and e.get("answer"):
             answer = answer_from_json(e["answer"])
-            outcome = e.get("outcome") if e.get("outcome") in _PRESENTS else "answer"
+            outcome = e.get("outcome")
+            if outcome not in _PRESENTS and outcome != "refuse":
+                outcome = "answer"
             frame = frame_from_json(e["frame"]) if e.get("frame") else None
             out.append(Interaction(
                 question=_question_for(e, last_query),
                 kind=outcome, answer=answer, verify=run_verify(answer, store),
+                reason=_REFUSAL_REASON if outcome == "refuse" else "",
                 note="Reconstructed from the audit log (I5) — a real logged session.",
                 trace=_provenance_line(e.get("provenance", {}), sup_prov),
                 frame=frame,
             ))
     return out
+
+
+_DEFAULT_FLOOR = 15.0
+
+_REFUSAL_REASON = (
+    "Cairn located the evidence and declined the conclusion. The question asks for a "
+    "legal determination — novelty, validity, infringement, or claim construction — "
+    "which a patent professional makes, not this tool (D10/D22). The spans it found are "
+    "shown below so the professional does not have to repeat the search. This is a "
+    "boundary, not an absence: the evidence is present; the conclusion is withheld.")
 
 
 def _question_for(record: dict, last_query: str | None) -> str:
@@ -253,6 +298,9 @@ mark.flash { outline:2px solid var(--chipb); }
 .badge.correction { background:#241a3a; color:var(--corr); }
 .badge.partial { background:#3a2f12; color:var(--markb); }
 .badge.refuse { background:#3a2413; color:var(--refuse); }
+.found-hd { margin:12px 0 4px; font-weight:600; font-size:13px; }
+.found { color:#c9d1d9; border-left:2px solid var(--refuse);
+         padding-left:10px; margin:6px 0; }
 .answer-text { background:var(--panel); border:1px solid var(--line); border-radius:8px;
   padding:12px 14px; }
 .reason { color:var(--muted); margin:0 0 8px; }
@@ -420,7 +468,7 @@ def _gather(interactions, store) -> dict[str, list[tuple[int, int, str, str]]]:
 
     for idx, inter in enumerate(interactions):
         iid = f"i{idx}"
-        if inter.kind in _PRESENTS and inter.answer is not None:
+        if inter.kind in _CITES and inter.answer is not None:
             cons = inter.frame.constraints if inter.frame else []
             for sent in inter.answer.sentences:
                 atoms = list(sent.atoms) + [o for d in sent.derived for o in d.operands]
@@ -664,6 +712,27 @@ def _unverified_card(inter: Interaction, store: SpanStore) -> str:
     return "".join(parts)
 
 
+def _refuse_card(inter: Interaction, seg_id) -> str:
+    """A refusal: the reason, then the evidence it located, and no conclusion.
+
+    The located spans are rendered as *findings*, not as an answer — same links into the
+    document as a presented answer, no verdict attached. "Locate first, then decline"
+    (D22) is only worth anything if the located part survives to the page; an empty
+    refusal spends the boundary and still leaves the professional to run the search.
+    """
+    parts = [f'<p class="reason">{_esc(inter.reason)}</p>']
+    if inter.answer is not None:
+        parts.append('<p class="found-hd">What Cairn located, for your review:</p>')
+        for sent in inter.answer.sentences:
+            parts.append(f'<p class="found">{_esc(sent.text)}</p>')
+            for a in sent.atoms:
+                mid = seg_id(a.doc_id, a.char_start)
+                cite = f"{a.doc_id} [{a.char_start}:{a.char_end}]"
+                link = (f'<a data-target="{mid}">{_esc(cite)}</a>' if mid else _esc(cite))
+                parts.append(f'<p class="closest">▸ {link} — {_esc(a.text[:150])}</p>')
+    return "".join(parts)
+
+
 def _elsewhere(literal: str, doc_id: str, store: SpanStore) -> int | None:
     """Where the claimed literal really sits, if it sits anywhere. Distinguishing a
     stale pointer from an invented quote is the whole question a reviewer has."""
@@ -715,6 +784,8 @@ def render_evidence_view(
     for idx, inter in enumerate(interactions):
         if inter.kind == _WITHHELD:
             body = _unverified_card(inter, store)
+        elif inter.kind == "refuse":
+            body = _refuse_card(inter, seg_id)
         elif inter.kind in _PRESENTS and inter.answer is not None:
             body = _answer_card(inter, store, seg_id)
         else:
