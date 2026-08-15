@@ -82,12 +82,42 @@ def test_question_label_highlighted_in_both_panes(store):
     assert '<mark class="qlbl">Total assets</mark>' in cards                   # right
 
 
-def test_unbound_claim_is_flagged_not_linked(store):
+def test_unbound_claim_is_withheld_not_merely_flagged(store):
+    """A figure bound to nothing is the shape a confabulated number takes, so the
+    answer is WITHHELD, not presented with a warning beside it. Flagging and
+    presenting still puts the number in front of a reader under a green badge."""
     ans = Answer([Sentence("Total assets were $999,999 million.", atoms=[])])
     inter = Interaction("Total assets?", "answer", answer=ans, verify=verify(ans, store))
     html = render_evidence_view([inter], store)
-    assert "✗ verify" in html and "999,999" in html
-    assert "data-target=" not in html
+    assert '<span class="badge unverified">' in html      # not the `answer` badge
+    assert '<span class="badge answer">' not in html
+    assert "999,999" in html and "unbound" in html        # named, so it is reviewable
+    assert "data-target=" not in html                     # and links nowhere
+
+
+def test_a_stale_offset_withholds_the_answer_and_says_where_the_quote_really_is(store):
+    """Defect B, made a standing test.
+
+    The view filtered on the LOGGED `ok`, re-ran verify, printed the failure — and
+    still drew the green badge with highlights at the stale offsets. On the first
+    engagement every one of 61 atoms had drifted, so each card boxed a real quote
+    around unrelated text. That is indistinguishable from fabrication to a reader,
+    and it is the reason a genuine prior-art citation was reported as invented.
+    """
+    real = _bind(store, "364,980", TOTAL_ASSETS)
+    stale = AtomBinding(text=real.text, doc_id=real.doc_id,
+                        char_start=real.char_start - 137,      # the observed drift
+                        char_end=real.char_end - 137)
+    ans = Answer([Sentence("Total assets were $364,980 million.", atoms=[stale])])
+    inter = Interaction("Total assets?", "answer", answer=ans, verify=verify(ans, store))
+    html = render_evidence_view([inter], store)
+
+    assert '<span class="badge unverified">' in html
+    assert '<span class="badge answer">' not in html
+    assert 'class="m k-fig"' not in html, "a stale offset must paint no highlight"
+    assert "mismatch" in html
+    # The distinction a reviewer actually needs: stale pointer, not invented quote.
+    assert "the quote is real, the offset is not" in html
 
 
 def test_abstention_shows_closest_spans(store):

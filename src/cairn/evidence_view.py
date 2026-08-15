@@ -20,7 +20,7 @@ import html
 import json
 import re
 from bisect import bisect_right
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from .cues import denial_cue_hits
 from .frame import QuestionFrame, check_coverage, frame_from_json
@@ -58,6 +58,30 @@ class Interaction:
 # Outcome classes that PRESENT something (D16) — they get cited-span highlights and
 # the answer-style card; only `abstain` stays silent.
 _PRESENTS = {"answer", "correction", "partial"}
+
+# An answer whose citations no longer resolve. Not one of D16's outcome classes: the
+# agent never chose it, the corpus decided it. Deliberately OUTSIDE _PRESENTS, so it
+# draws no highlights — an unresolvable offset paints a box around unrelated text,
+# which is worse than painting nothing.
+_WITHHELD = "unverified"
+
+
+def _withhold_unverified(interactions: list[Interaction]) -> list[Interaction]:
+    """Downgrade any interaction whose live `verify` failed. The loop rule ("present
+    only if ok AND coverage.complete") enforced where it cannot be bypassed.
+
+    The view used to filter on the *logged* `ok`, re-run verify, print the failure —
+    and still render the green ANSWER badge with highlights drawn at the stale offsets.
+    On the first engagement all 61 atoms had drifted, so every card showed a real quote
+    boxed around unrelated text, which reads exactly like fabrication. A failing verify
+    is a reason to withhold the presentation, not an annotation to hang beside it.
+    """
+    out = []
+    for inter in interactions:
+        if inter.kind in _PRESENTS and inter.verify is not None and not inter.verify.ok:
+            inter = replace(inter, kind=_WITHHELD)
+        out.append(inter)
+    return out
 
 
 def interactions_from_audit(entries: list[dict], store: SpanStore) -> list[Interaction]:
@@ -222,6 +246,10 @@ mark.flash { outline:2px solid var(--chipb); }
   padding:2px 8px; border-radius:999px; text-transform:uppercase; margin-bottom:10px; }
 .badge.answer { background:#11331c; color:var(--ok); }
 .badge.abstain, .badge.reject { background:#3a1d1d; color:var(--bad); }
+.badge.unverified { background:#3a1d1d; color:var(--bad); }
+.card.unverified { border-left:3px solid var(--bad); }
+.withheld-text { color:#8b93a3; font-style:italic; border-left:2px solid #3a3f4b;
+                 padding-left:10px; margin:8px 0; }
 .badge.correction { background:#241a3a; color:var(--corr); }
 .badge.partial { background:#3a2f12; color:var(--markb); }
 .badge.refuse { background:#3a2413; color:var(--refuse); }
@@ -586,10 +614,71 @@ def _abstain_card(inter: Interaction, seg_id) -> str:
     return "".join(parts)
 
 
+_STATUS_WHY = {
+    "mismatch": "the text at that offset is different text",
+    "out_of_range": "that offset is past the end of the document",
+    "stale_hash": "the document has changed since the citation was made",
+}
+
+
+def _unverified_card(inter: Interaction, store: SpanStore) -> str:
+    """Why an answer was withheld, atom by atom — claimed literal vs. what is there.
+
+    The audit record keeps only a bare `ok`, so after the fact nothing says WHICH atom
+    failed or how. The view can recompute it, so it does: this card is the diagnosis
+    the log cannot give, and it is the difference between "something is wrong" and
+    "atom 3 is 137 characters early".
+    """
+    parts = [
+        '<p class="reason">Withheld — this answer\'s citations do not resolve against '
+        "the corpus as it stands, so it is not presented and nothing is highlighted. "
+        "The quoted text may well be genuine; what failed is the <em>pointer</em>.</p>"
+    ]
+    if inter.answer is not None:
+        for sent in inter.answer.sentences:
+            parts.append(f'<p class="withheld-text">{_esc(sent.text)}</p>')
+    for fig in (inter.verify.unbound() if inter.verify else []):
+        # Independent extraction (verify §2): a figure in the prose that no binding
+        # accounts for. Named outright — this is the shape a confabulated number takes.
+        parts.append(f'<p class="closest">✕ <b>unbound</b> — {_esc(fig)} appears in the '
+                     "answer but is bound to no source span</p>")
+    for s in (inter.verify.sentences if inter.verify else []):
+        for v in s.atom_verdicts:
+            if v.status == "ok":
+                continue
+            why = _STATUS_WHY.get(v.status, v.status)
+            b = v.binding
+            parts.append(
+                f'<p class="closest">✕ <b>{v.status}</b> — {_esc(why)}<br>'
+                f'<span style="color:#8b93a3">claimed at [{b.char_start}:{b.char_end}]:</span> '
+                f"{_esc(b.text[:120])}"
+            )
+            found = _elsewhere(b.text, b.doc_id, store)
+            if found is not None:
+                parts.append(f'<br><span style="color:#8b93a3">that literal does occur, '
+                             f"at [{found}] — the quote is real, the offset is not.</span>")
+            elif v.found is not None:
+                parts.append(f'<br><span style="color:#8b93a3">what is actually there:</span> '
+                             f"{_esc(v.found[:120])}")
+            parts.append("</p>")
+    return "".join(parts)
+
+
+def _elsewhere(literal: str, doc_id: str, store: SpanStore) -> int | None:
+    """Where the claimed literal really sits, if it sits anywhere. Distinguishing a
+    stale pointer from an invented quote is the whole question a reviewer has."""
+    try:
+        pos = store.get_document(doc_id).find(literal)
+    except Exception:                                  # noqa: BLE001 — doc may be absent
+        return None
+    return pos if pos >= 0 else None
+
+
 def render_evidence_view(
     interactions: list[Interaction], store: SpanStore, *,
     title: str = "CAIRN — evidence view", figures: list[FigurePanel] | None = None,
 ) -> str:
+    interactions = _withhold_unverified(interactions)
     raw = _gather(interactions, store)
     painted = {doc_id: _paint(rs) for doc_id, rs in raw.items()}
 
@@ -624,9 +713,12 @@ def render_evidence_view(
 
     cards = []
     for idx, inter in enumerate(interactions):
-        body = _answer_card(inter, store, seg_id) if (
-            inter.kind in _PRESENTS and inter.answer is not None
-        ) else _abstain_card(inter, seg_id)
+        if inter.kind == _WITHHELD:
+            body = _unverified_card(inter, store)
+        elif inter.kind in _PRESENTS and inter.answer is not None:
+            body = _answer_card(inter, store, seg_id)
+        else:
+            body = _abstain_card(inter, seg_id)
         trace = f'<p class="trace"><b>decision</b> · {_esc(inter.trace)}</p>' if inter.trace else ""
         terms = tuple(c.text for c in inter.frame.constraints) if inter.frame else ()
         q_html = _render_text(inter.question, label_terms=terms)
