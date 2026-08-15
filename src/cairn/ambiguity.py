@@ -196,28 +196,30 @@ def figure_guess(assignments) -> list[Ambiguity]:
     return out
 
 
-def element_phrase(mentions, *, max_words: int = 8) -> list[Ambiguity]:
-    """A numeral whose recited element phrase reads as a clause, not a part name.
+def element_phrase(mentions) -> list[Ambiguity]:
+    """A numeral whose element name is still a sentence fragment after reduction.
 
-    Where the parser understood the sentence poorly. The numeral is right; the name
-    beside it may be nonsense, and that name is what a reviewer reads in the legend.
+    Judged by `nounphrase.is_name` rather than by LENGTH. A word count flagged long but
+    perfectly good names ("primary and secondary liquid outlet pipes") while passing
+    short broken ones ("include a", "by a motor") — it measured the wrong property. What
+    matters is whether the phrase ends in something that can head a noun phrase.
     """
+    from .nounphrase import is_name
     seen: dict[str, object] = {}
     for m in mentions:
         seen.setdefault(m.number, m)
     out = []
     for label, m in sorted(seen.items(), key=lambda kv: (len(kv[0]), kv[0])):
-        words = m.element.split()
-        if len(words) < max_words:
+        if is_name(m.element):
             continue
         out.append(Ambiguity(
             amb_id=f"{ELEMENT_PHRASE}:{label}",
             kind=ELEMENT_PHRASE,
             label=label,
             question=f"What is “{label}” actually called?",
-            detail=(f"The parser read the element as “{m.element}”, which is a clause "
-                    f"rather than a part name — the numeral is located correctly, but "
-                    f"this is the name the legend shows."),
+            detail=(f"The parser read the element as “{m.element}”, which is a sentence "
+                    f"fragment rather than a part name — the numeral is located "
+                    f"correctly, but this is the name the legend shows."),
             options=(Option(m.element, "keep the parsed phrase"),
                      Option("(correct it)", "type the part's real name")),
             proposed="(correct it)",

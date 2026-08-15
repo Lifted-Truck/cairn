@@ -19,6 +19,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from .nounphrase import head_phrase
 from .retrieval import BM25Backend
 from .spans import Span
 
@@ -421,6 +422,12 @@ _FIG_REF = re.compile(
 NUMERAL_DIGITS = 4
 _LABEL_RE = rf"\d{{1,{NUMERAL_DIGITS}}}[a-zA-Z]?"
 
+# A number hyphenated to a word is a COMPOUND MODIFIER, not a reference numeral:
+# "a 36-pin connector", "a 12-volt supply". Without this guard "36" was extracted as a
+# part on US8046721B2, with the element phrase "include a" — the noun-phrase reduction
+# (D80) left it as the single residue on both patents, which is how it was found.
+_COMPOUND_MOD = r"(?!-[A-Za-z])"
+
 _NUMERAL = re.compile(
     # The element phrase may end in punctuation — "…garbage disposal) 3, dishwasher 4"
     # recites 3, but a bare `[a-z]+\s+` boundary skips it (the ")" intervenes).
@@ -434,7 +441,7 @@ _NUMERAL = re.compile(
     # — and text is where grounding binds (I1), so that is a wrong citation, not a
     # missing aid. Found by the OCR failure-mode swarm, 2026-07-25.
     r"\b((?:the |a |an |said )?(?:[a-z]+ ){0,2}[a-z]+)[)\]]?\s+"
-    rf"({_LABEL_RE})(?![\dA-Za-z])(?!\.\d)"
+    rf"({_LABEL_RE})(?![\dA-Za-z])(?!\.\d){_COMPOUND_MOD}"
 )
 # `in` is the inches ABBREVIATION only when written "in." — bare `in` is the
 # preposition, and treating it as a unit silently discarded real recitations: "the
@@ -666,7 +673,13 @@ def numeral_mentions(text: str) -> list[Numeral]:
         if _UNIT_AFTER.match(region[m.end():m.end() + 14]):    # a quantity, not a pointer
             continue
         num = m.group(2).lower()                       # "12a" stays distinct from "12"
-        s = m.start() + (m.group(0).find(phrase))
+        # Reduce the captured words to the noun phrase they contain (D80). Where
+        # nothing survives ("include a" names no thing), the RAW phrase is kept rather
+        # than the numeral dropped: a loose label is visible to a reviewer and flagged
+        # by the interpretation queue, an absent numeral is invisible to everyone.
+        phrase = head_phrase(phrase) or phrase
+        at = m.group(0).find(phrase)
+        s = m.start() + (at if at >= 0 else 0)
         out.append(Numeral(num, phrase, s, m.end()))
         # list siblings: "pipes 56, 58" recites 58 with no noun phrase of its own —
         # it inherits the list head's element. ("58" only ever appears in lists on
@@ -677,7 +690,8 @@ def numeral_mentions(text: str) -> list[Numeral]:
             # by "and", not a comma, so a comma-only pattern drops it. Safe because the
             # label must follow immediately: in "the pipe 56 and the valve 58", "the"
             # follows "and", so 58 is not mis-inherited as a sibling of "pipe".
-            sib = re.match(rf"(?:,\s*|,?\s+and\s+)({_LABEL_RE})(?![\dA-Za-z])(?!\.\d)",
+            sib = re.match(rf"(?:,\s*|,?\s+and\s+)({_LABEL_RE})"
+                           rf"(?![\dA-Za-z])(?!\.\d){_COMPOUND_MOD}",
                            region[tail:])
             if not sib:
                 break
@@ -689,6 +703,7 @@ def numeral_mentions(text: str) -> list[Numeral]:
         if _UNIT_AFTER.match(region[m.end():m.end() + 14]):
             continue
         phrase = _subject_before(region, m.start())
+        phrase = head_phrase(phrase) or phrase
         if phrase:
             out.append(Numeral(m.group(2).lower(), phrase, m.start(2), m.end(2)))
 
@@ -705,7 +720,7 @@ def numeral_mentions(text: str) -> list[Numeral]:
 _POINTER = re.compile(
     r"\b(shown|indicated|designated|illustrated|denoted|depicted|referenced)"
     r"(?:\s+(?:generally|schematically|diagrammatically|broadly|collectively))?"
-    rf"\s+(?:at|by)\s+({_LABEL_RE})(?![\dA-Za-z])(?!\.\d)",
+    rf"\s+(?:at|by)\s+({_LABEL_RE})(?![\dA-Za-z])(?!\.\d){_COMPOUND_MOD}",
     re.IGNORECASE,
 )
 # Copular tails that sit between the element and the pointer: "the filter IS PROVIDED
