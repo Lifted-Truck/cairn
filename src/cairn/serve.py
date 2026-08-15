@@ -173,11 +173,53 @@ def make_handler(tools: dict[str, Tool], root: Path, port: int, *,
                     note=str(body.get("note") or ""), value=dict(body.get("value") or {}),
                     supersedes=body.get("supersedes"))
                 adj_log.append(adj)
+            except ValueError as e:
+                # An append-only log correctly refusing a duplicate is not a fault the
+                # reviewer committed, and it was reaching them as a raw exception string
+                # telling them to "append a new entry with supersedes=..." — advice with
+                # no button behind it. Say what is already on the record and let the page
+                # mark the row; a re-judgment is a deliberate act, not an error recovery.
+                prior = next((a for a in adj_log.effective()
+                              if a.adj_id.split("::")[0] == item_id), None)
+                if prior is not None:
+                    self._json(409, {
+                        "error": f"already judged — recorded as “{prior.kind}” by "
+                                 f"{prior.by} on {prior.on}. This queue page was built "
+                                 f"before that; reload to refresh it.",
+                        "already": {"kind": prior.kind, "by": prior.by, "on": prior.on}})
+                    return
+                self._json(409, {"error": str(e)})
+                return
             except Exception as e:                # noqa: BLE001 — surfaced verbatim
                 self._json(409, {"error": f"{type(e).__name__}: {e}"})
                 return
             self._json(200, {"recorded": adj.adj_id, "by": reviewer, "on": on,
                              "in_force": len(adj_log.effective())})
+
+        def do_GET(self) -> None:                # noqa: N802 — stdlib naming
+            """`/judged` answers from the LIVE log; everything else is a static file.
+
+            The queue pages are built once and then judged against for hours, so a page
+            held open (or reloaded from an older build) still lists items the reviewer
+            has already ruled on. Clicking one collided with its own earlier record and
+            surfaced a raw `ValueError` about append-only logs — a correct refusal
+            delivered as a stack-trace fragment, for doing nothing wrong.
+
+            Rebuilding the page server-side would mean running the whole console build
+            on a GET. Answering "what is already judged?" is the same information at a
+            fraction of the cost, and it keeps the page static.
+            """
+            if self.path == "/judged":
+                if adj_log is None:
+                    self._json(200, {"judged": {}})
+                    return
+                judged = {}
+                for a in adj_log.effective():
+                    item_id = a.adj_id.split("::")[0]
+                    judged[item_id] = {"kind": a.kind, "by": a.by, "on": a.on}
+                self._json(200, {"judged": judged})
+                return
+            super().do_GET()
 
         def do_POST(self) -> None:               # noqa: N802 — stdlib naming
             if not origin_allowed(self.headers.get("Origin"), port):

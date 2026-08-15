@@ -40,6 +40,13 @@ def _crop(item, sheet_files: dict[int, str]) -> str:
     so it gets a stated absence rather than an empty frame, which would read as "the
     system looked and found nothing here" instead of "the system has no location".
 
+    The ring is drawn at the mark's REAL width and height, not a fixed size. Marks
+    vary enormously — on sheet 9, "CL" is 0.050 x 0.014 of the page and "LTM" on sheet
+    2 is 0.031 x 0.053 (tall, because it is rotated text) — so a fixed ring at the box
+    centre sat beside the glyphs on wide marks and across the middle of tall ones, and
+    read as a positioning bug. The reviewer is being asked whether OCR was right about
+    a REGION, so the region is what gets drawn.
+
     The centre is computed here, through `annotate.box_to_display`, and NOT in the
     page's JavaScript. Manifest `y` is measured from the BOTTOM to the box's lower
     edge; a browser wants distance from the top. The first version of this crop did the
@@ -56,7 +63,8 @@ def _crop(item, sheet_files: dict[int, str]) -> str:
     d = box_to_display(item.x, item.y, item.w or 0.0, item.h or 0.0)
     cx, cy = d["left"] + d["width"] / 2, d["top"] + d["height"] / 2
     return (f"<div class='crop' data-file='{_e(file)}' "
-            f"data-x='{cx:.6f}' data-y='{cy:.6f}'>"
+            f"data-x='{cx:.6f}' data-y='{cy:.6f}' "
+            f"data-w='{d['width']:.6f}' data-h='{d['height']:.6f}'>"
             f"<img alt='sheet {_e(item.page)} near numeral {_e(item.label)}'>"
             f"<span class='ring'></span></div>"
             f"<p class='cropcap'>Sheet {_e(item.page)} at "
@@ -147,8 +155,8 @@ button:disabled{opacity:.5;cursor:default}
 .crop{position:relative;width:100%;max-width:420px;height:190px;overflow:hidden;
  border:1px solid var(--rule);border-radius:6px;background:#fff;margin:0 0 5px}
 .crop img{position:absolute;max-width:none;image-rendering:auto}
-.crop .ring{position:absolute;left:50%;top:50%;width:44px;height:34px;
- transform:translate(-50%,-50%);border:2px solid #c8402c;border-radius:4px;
+.crop .ring{position:absolute;left:50%;top:50%;
+ transform:translate(-50%,-50%);border:2px solid #c8402c;border-radius:3px;
  box-shadow:0 0 0 9999px rgba(0,0,0,.10);pointer-events:none}
 .crop .zoom{position:absolute;right:6px;bottom:6px;display:flex;gap:4px}
 .crop .zoom button{padding:1px 8px;font:600 13px var(--mono);opacity:.9}
@@ -184,6 +192,11 @@ document.querySelectorAll('.crop').forEach(box => {
     const h = img.clientHeight;                // set by the width, aspect preserved
     img.style.left = (box.clientWidth / 2 - box.dataset.x * w) + 'px';
     img.style.top  = (box.clientHeight / 2 - box.dataset.y * h) + 'px';
+    // The ring is the mark's real extent, scaled with the image -- the reviewer is
+    // judging whether OCR was right about a REGION, so draw the region.
+    const ring = box.querySelector('.ring');
+    ring.style.width  = Math.max(8, box.dataset.w * w) + 'px';
+    ring.style.height = Math.max(8, box.dataset.h * h) + 'px';
   }
   img.addEventListener('load', place);
   img.src = 'sheets/' + box.dataset.file;
@@ -200,6 +213,23 @@ document.querySelectorAll('.crop').forEach(box => {
   }
   box.appendChild(zoom);
 });
+
+// Reconcile this page against the live judgment log. The page is a static build; the
+// log moves on. Without this, a row already ruled on still offers its buttons, and
+// clicking one collides with the reviewer's own earlier record.
+fetch('judged').then(r => r.json()).then(d => {
+  for (const [id, j] of Object.entries(d.judged || {})) {
+    const li = document.querySelector(`.item[data-id="${CSS.escape(id)}"]`);
+    if (!li) continue;
+    li.classList.add('done');
+    li.querySelectorAll('button').forEach(b => b.disabled = true);
+    li.querySelector('.said').textContent =
+      `already ${j.kind}ed by ${j.by} on ${j.on}`;
+  }
+  const left = document.querySelectorAll('.item:not(.done)').length;
+  const h = document.querySelector('h1');
+  if (h) h.textContent = `Needs a human — ${left} outstanding`;
+}).catch(() => {});   // no server: the page still reads, it just cannot reconcile
 
 document.querySelectorAll('.item .acts button').forEach(btn => {
   btn.addEventListener('click', async () => {
@@ -219,7 +249,10 @@ document.querySelectorAll('.item .acts button').forEach(btn => {
         })
       });
       const d = await r.json();
-      if (d.error) {
+      if (d.already) {
+        said.className = 'said'; said.textContent = d.error;
+        li.classList.add('done');          // it IS judged; the page was just stale
+      } else if (d.error) {
         said.className = 'said bad'; said.textContent = d.error;
         li.querySelectorAll('button').forEach(b => b.disabled = false);
       } else {

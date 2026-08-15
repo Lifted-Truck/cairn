@@ -109,3 +109,55 @@ def test_console_pages_are_never_cached(tmp_path):
             assert r.read() == b"<p>v2</p>"
     finally:
         srv.shutdown()
+
+
+def test_judged_answers_from_the_live_log_so_a_stale_page_can_reconcile(tmp_path):
+    """D71: the queue page is a static build; the judgment log moves on.
+
+    A page held open (or reloaded from an older build) still lists items already ruled
+    on, and clicking one collided with the reviewer's OWN earlier record — surfacing a
+    raw ValueError about append-only logs, which is a correct refusal delivered as a
+    stack-trace fragment for doing nothing wrong.
+    """
+    import json
+    import urllib.request
+
+    from cairn.adjudication import Adjudication, AdjudicationLog
+
+    log = AdjudicationLog(tmp_path / "adj.jsonl")
+    log.append(Adjudication(
+        adj_id="drawn_not_recited:280::refute::2026-08-09", kind="refute",
+        target_kind="figure-numeral", target={"page": 9, "numeral": "280"},
+        by="J. Smith", on="2026-08-09", note=""))
+    (tmp_path / "index.html").write_text("<p>console</p>", encoding="utf-8")
+
+    # Same date as the existing record: the adj_id embeds the date, so only a
+    # SAME-DAY re-click collides. A later-dated re-judgment is a genuine second
+    # event (a re-review) and is accepted — which is why the page reconciling
+    # against /judged matters more than the collision error does.
+    srv = serve({}, tmp_path, port=0, reviewer="J. Smith", on="2026-08-09", adj_log=log)
+    port = srv.server_address[1]
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/judged") as r:
+            judged = json.loads(r.read())["judged"]
+        assert judged["drawn_not_recited:280"] == {
+            "kind": "refute", "by": "J. Smith", "on": "2026-08-09"}
+
+        # …and re-judging it answers with a readable account, not an exception string.
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/adjudicate", method="POST",
+            data=json.dumps({"item_id": "drawn_not_recited:280", "kind": "refute",
+                             "target": {"page": 9, "numeral": "280"}}).encode(),
+            headers={"Content-Type": "application/json"})
+        try:
+            urllib.request.urlopen(req)
+            raise AssertionError("a duplicate judgment must not be accepted")
+        except urllib.error.HTTPError as e:
+            body = json.loads(e.read())
+            assert e.code == 409
+            assert body["already"]["kind"] == "refute"
+            assert "already judged" in body["error"] and "ValueError" not in body["error"]
+    finally:
+        srv.shutdown()

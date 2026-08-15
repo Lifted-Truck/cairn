@@ -12,6 +12,7 @@ query give the same result.
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
 import webbrowser
 from pathlib import Path
 
@@ -29,7 +30,13 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--reviewer", help="who is recording judgments — enables /adjudicate")
-    ap.add_argument("--on", metavar="YYYY-MM-DD", help="date for recorded judgments")
+    # Defaults to TODAY rather than being required. A pinned date in a launch config
+    # silently backdates every judgment made after the day it was written -- judgments
+    # made on the 15th were being stamped the 9th, which is a false provenance date on
+    # the one record a human authors. An explicit --on still wins, for backfilling.
+    ap.add_argument("--on", metavar="YYYY-MM-DD",
+                    default=_dt.date.today().isoformat(),
+                    help="date for recorded judgments (default: today)")
     ap.add_argument("--adjudications", help="path to the append-only judgment log")
     ap.add_argument("--open", action="store_true", help="open a browser at the console")
     ns = ap.parse_args()
