@@ -28,6 +28,7 @@ from .calibration import ThresholdChoice
 from .calibration import resolve as resolve_threshold
 from .frame import ROLES, coverage_for_answer, coverage_to_json, frame_from_json
 from .ingest import DocumentStore
+from .ingest.document import content_hash
 from .retrieval import Hit, Retriever
 from .session import support_record, verify_record
 from .spans import SpanStore
@@ -238,8 +239,16 @@ def default_registry(
             ["query"],
         ))
 
-    reg("get_span", "Fetch + hash-verify a span's exact text (I3).",
-        lambda a: {"text": span_store.get_span(a["doc_id"], a["start"], a["end"])},
+    # Every read hands back the corpus identity it read against, because a binding must
+    # carry that hash for `verify` to detect drift (I3) — and until this was returned,
+    # the agent had no way to obtain one. The field existed on AtomBinding from the
+    # first commit and was supplied 0 times in 61 bindings: the check was unreachable,
+    # not merely unused, and drift went silent for a whole engagement (D65).
+    reg("get_span", "Fetch + hash-verify a span's exact text (I3). Returns the doc's "
+        "content_hash — pass it back as the binding's content_hash.",
+        lambda a: {"text": span_store.get_span(a["doc_id"], a["start"], a["end"]),
+                   "doc_id": a["doc_id"],
+                   "content_hash": content_hash(span_store.get_document(a["doc_id"]))},
         _obj(
             {
                 "doc_id": _DOC_ID,
@@ -249,8 +258,10 @@ def default_registry(
             ["doc_id", "start", "end"],
         ))
 
-    reg("get_document", "Full hash-verified canonical text — read freely (D11).",
-        lambda a: {"doc_id": a["doc_id"], "text": span_store.get_document(a["doc_id"])},
+    reg("get_document", "Full hash-verified canonical text — read freely (D11). Returns "
+        "the content_hash to bind with.",
+        lambda a: {"doc_id": a["doc_id"], "text": span_store.get_document(a["doc_id"]),
+                   "content_hash": content_hash(span_store.get_document(a["doc_id"]))},
         _obj({"doc_id": _DOC_ID}, ["doc_id"]))
 
     # --- Write tools: append a replayable record to the audit log (I5); read_only=False ---

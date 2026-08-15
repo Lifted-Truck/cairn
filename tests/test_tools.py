@@ -35,11 +35,18 @@ def _ta_span(registry) -> tuple[int, int]:
 
 
 def _bind_total_assets(registry, literal: str = "364,980") -> dict:
-    """JSON atom binding a figure to its exact offset on the 'Total assets' line."""
+    """JSON atom binding a figure to its exact offset on the 'Total assets' line.
+
+    Carries the `content_hash` that `get_span` returned, which is the whole loop D65
+    closed: the read hands back the corpus identity it read against, and the binding
+    hands it to `verify`, so drift between the two is detectable. Before that, no read
+    tool returned a hash and no binding could carry one.
+    """
     start, end = _ta_span(registry)
-    text = registry["get_span"].handler({"doc_id": DOC_ID, "start": start, "end": end})["text"]
-    off = start + text.index(literal)
-    return {"text": literal, "doc_id": DOC_ID, "char_start": off, "char_end": off + len(literal)}
+    span = registry["get_span"].handler({"doc_id": DOC_ID, "start": start, "end": end})
+    off = start + span["text"].index(literal)
+    return {"text": literal, "doc_id": DOC_ID, "char_start": off,
+            "char_end": off + len(literal), "content_hash": span["content_hash"]}
 
 
 def test_expected_tools_are_enumerated(registry):
@@ -210,9 +217,11 @@ def test_verify_flags_naive_citation_as_coverage_incomplete(registry):
         {"query": "total liabilities shareholders equity", "k": 8})["hits"]
     liab = next(h for h in hits if h["text"].startswith("Total liabilities and shareholders"))
     off = liab["char_start"] + liab["text"].index("364,980")
+    h = registry["get_document"].handler({"doc_id": DOC_ID})["content_hash"]
     answer = {"sentences": [{"text": "Apple's total assets were $364,980 million.",
                              "atoms": [{"text": "364,980", "doc_id": DOC_ID,
-                                        "char_start": off, "char_end": off + 7}]}]}
+                                        "char_start": off, "char_end": off + 7,
+                                        "content_hash": h}]}]}
     out = registry["verify"].handler({"answer": answer,
                                       "frame": _frame(("metric", "Total assets"))})
     assert out["ok"] is True                                # the citation is REAL...
@@ -227,7 +236,7 @@ def test_verify_without_frame_is_unchanged(registry):
     assert out["ok"] is True and "coverage" not in out
 
 
-TOOL_MANIFEST_SHA256 = "70c8f6a6df4d4afe336da615ca2e44bfadbaf814c6f6a1ead387e07e4a90a9d5"
+TOOL_MANIFEST_SHA256 = "35f4051c71f1b50c8932d76c27a729637315815de4f101944391d0a660085144"
 
 
 def _registry(tmp_path):

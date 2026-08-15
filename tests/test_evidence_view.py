@@ -8,6 +8,7 @@ links to a real mark.
 """
 
 import re
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -34,7 +35,15 @@ def store() -> SpanStore:
 def _bind(store, literal, line):
     start, _ = store.resolve_quote(DOC, line)
     i = line.index(literal)
-    return AtomBinding(literal, DOC, start + i, start + i + len(literal))
+    return AtomBinding(literal, DOC, start + i, start + i + len(literal),
+                       store._docs[DOC].content_hash)
+
+
+def _atom_json(a) -> dict:
+    """The wire form of a binding — including the corpus hash it was made against,
+    which D65 makes load-bearing rather than optional."""
+    return {"text": a.text, "doc_id": a.doc_id, "char_start": a.char_start,
+            "char_end": a.char_end, "content_hash": a.content_hash}
 
 
 def _clean(store, frame=None) -> Interaction:
@@ -105,9 +114,8 @@ def test_a_stale_offset_withholds_the_answer_and_says_where_the_quote_really_is(
     and it is the reason a genuine prior-art citation was reported as invented.
     """
     real = _bind(store, "364,980", TOTAL_ASSETS)
-    stale = AtomBinding(text=real.text, doc_id=real.doc_id,
-                        char_start=real.char_start - 137,      # the observed drift
-                        char_end=real.char_end - 137)
+    stale = replace(real, char_start=real.char_start - 137,     # the observed drift
+                    char_end=real.char_end - 137)
     ans = Answer([Sentence("Total assets were $364,980 million.", atoms=[stale])])
     inter = Interaction("Total assets?", "answer", answer=ans, verify=verify(ans, store))
     html = render_evidence_view([inter], store)
@@ -158,8 +166,7 @@ def test_interactions_from_audit_rebuilds_presented(store):
     atom = _bind(store, "364,980", TOTAL_ASSETS)
     answer_json = {"sentences": [{
         "text": "Apple's total assets were $364,980 million.",
-        "atoms": [{"text": atom.text, "doc_id": atom.doc_id,
-                   "char_start": atom.char_start, "char_end": atom.char_end}],
+        "atoms": [_atom_json(atom)],
     }]}
     frame = {"question": "What were Apple's total assets?",
              "constraints": [{"role": "metric", "text": "total assets"}]}
@@ -190,8 +197,7 @@ def test_the_question_comes_from_the_record_never_from_a_neighbour(store):
     atom = _bind(store, "364,980", TOTAL_ASSETS)
     answer_json = {"sentences": [{
         "text": "Apple's total assets were $364,980 million.",
-        "atoms": [{"text": atom.text, "doc_id": atom.doc_id,
-                   "char_start": atom.char_start, "char_end": atom.char_end}],
+        "atoms": [_atom_json(atom)],
     }]}
     entries = [
         {"kind": "check_support", "query": "executive compensation table",
@@ -215,8 +221,7 @@ def test_a_frameless_record_labels_its_fallback_as_a_query(store):
         {"kind": "check_support", "query": "apple total assets", "status": "supported"},
         {"kind": "verify", "ok": True, "answer": {"sentences": [{
             "text": "Apple's total assets were $364,980 million.",
-            "atoms": [{"text": atom.text, "doc_id": atom.doc_id,
-                       "char_start": atom.char_start, "char_end": atom.char_end}]}]}},
+            "atoms": [_atom_json(atom)]}]}},
     ]
     q = interactions_from_audit(entries, store)[0].question
     assert "not logged" in q and "apple total assets" in q
@@ -248,8 +253,7 @@ def test_from_audit_tags_outcome(store):
     atom = _bind(store, "352,583", TOTAL_ASSETS)
     answer_json = {"sentences": [{
         "text": "Total assets rose to $364,980M (from $352,583M).",
-        "atoms": [{"text": atom.text, "doc_id": atom.doc_id,
-                   "char_start": atom.char_start, "char_end": atom.char_end}],
+        "atoms": [_atom_json(atom)],
     }]}
     entries = [
         {"kind": "check_support", "query": "Why did total assets decline?",
@@ -377,7 +381,8 @@ def test_denial_cue_advisory_renders_non_blocking(tmp_path):
     text = s.get_document("note")
     off = text.index("2,000,000")
     ans = Answer([Sentence("Total assets and liabilities are $2,000,000.",
-                           atoms=[AtomBinding("2,000,000", "note", off, off + 9)])])
+                           atoms=[AtomBinding("2,000,000", "note", off, off + 9,
+                                              s._docs["note"].content_hash)])])
     inter = Interaction("What are the total assets and liabilities?", "answer",
                         answer=ans, verify=verify(ans, s))
     html = render_evidence_view([inter], s)

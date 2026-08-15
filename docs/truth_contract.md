@@ -1,9 +1,11 @@
 # CAIRN — the truth contract
 
-**Version: 1.2** · governed by [`ROADMAP.md`](../ROADMAP.md) decision **D21**.
+**Version: 2.1** · governed by [`ROADMAP.md`](../ROADMAP.md) decision **D21**.
 
 | Version | Date | Change | Kind |
 |---|---|---|---|
+| **2.1** | 2026-08-14 | **I3 enforced rather than offered (D65):** `verify` compared the corpus hash only when a binding supplied one, so an omitted hash SKIPPED the drift check instead of failing it — and no read tool returned a hash, so the field was unreachable. It was supplied 0 times in 61 bindings on the first engagement; when the corpus moved, every offset went stale in silence. `get_span`/`get_document` now return the hash they read against, and an unhashed binding resolves `unhashed` (not ok). Retroactively invalidates all 23 answers recorded for US5447630A, which is correct — they do not resolve. | strengthening → minor |
+| **2.0** | 2026-08-09 | **I6 relaxed to "no model on the deciding path" (D60):** retrieval may embed a query with a pinned, recorded model, because retrieval proposes and never decides; everything downstream stays model-free. Document embeddings are ingestion-time and frozen. Versioned as a major bump because the old form was grep-checkable and the new one takes judgment. | weakening → major |
 | **1.2** | 2026-07-06 | **Live constraint coverage (D13/M2-T8):** the agent emits a typed question frame; `verify` deterministically checks the cited evidence **covers every required constraint** (the connecting clause), logs frame + coverage (replayable), and the loop presents **only if `ok` AND `coverage.complete`**. Converts a chunk of "does the evidence answer *this* question" from offline-judged into runtime-checkable — the guarantee the incumbents were falsified on ([landscape §1](landscape_lessons.md)). | strengthening → minor |
 | 1.1 | 2026-06-30 | Outcome honesty refined (D22): **refuse-to-adjudicate** becomes a first-class fifth outcome, distinct from `abstain` — the evidence may be *present*; the legal conclusion is declined (UPL boundary). Scored separately at Layer-E (`refusal_accuracy`); rendered distinctly. | strengthening → minor |
 | 1.0 | 2026-06-29 | Initial declaration (D21). | — |
@@ -30,7 +32,7 @@ Everything below is the machinery that makes that guarantee real and checkable.
 |---|---|---|---|---|
 | **I1 — span provenance** | every cited atom points to a real `(doc_id, char_start, char_end)` | `verify` atom resolver (D9) | runtime + Layer-0 | **hard** — enforced live, gated |
 | **I2 — abstain over fabricate** | below the support floor → structured refusal, not an answer | `check_support` (content-absence, D12); agent reasoning for traps | runtime; Layer-0 (deterministic half); Layer-E (semantic) | **hard** for content-absence; **measured** for semantic traps |
-| **I3 — verified immutability** | content-hash at ingest; any span/hash drift is a hard failure | content-hash + `verify` hash check | runtime + Layer-0 | **hard** |
+| **I3 — verified immutability** | content-hash at ingest; any span/hash drift is a hard failure — **and a binding that carries no hash fails too** (D65) | content-hash + `verify` hash check, mandatory per binding; read tools return the hash to bind with | runtime + Layer-0 | **hard** |
 | **I4 — read/write asymmetry** | the corpus is read-only; the only writable surface is the audit log | structural (only write tools hold the log) | runtime + Layer-0 | **hard** |
 | **I5 — append-only audit** | every interaction logged immutably and replayably | `AuditLog` (hash-chained) | runtime + Layer-0 | **hard** |
 | **I6 — deterministic evidence** | same corpus + query → reproducible results; **no model on the deciding path** (see I6 note, contract 2.0) | seeded/temperature-0 evidence path | runtime + Layer-0 | **hard** |

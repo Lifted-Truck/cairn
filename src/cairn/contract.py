@@ -17,4 +17,4 @@ major for a structural change to what is guaranteed.
 # never decides. Versioned as a major bump because the old form was checkable by grep and
 # the new one takes judgment: a real reduction in auditability, even though no guarantee
 # about output moved. See docs/truth_contract.md "I6 as amended".
-CONTRACT_VERSION = "2.0"
+CONTRACT_VERSION = "2.1"

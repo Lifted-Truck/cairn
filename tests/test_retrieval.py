@@ -124,14 +124,16 @@ def test_retrieval_cannot_produce_a_wrong_citation():
     from cairn.verify import Answer, AtomBinding, Sentence, verify
 
     text = "Total assets were 364,980 million."
-    store = SpanStore([make_document("D", text)])
+    doc = make_document("D", text)
+    store = SpanStore([doc])
     i = text.index("364,980")
+    h = doc.content_hash
 
     good = Sentence("Assets were 364,980 million.",
-                    atoms=[AtomBinding("364,980", "D", i, i + 7)])
+                    atoms=[AtomBinding("364,980", "D", i, i + 7, h)])
     assert verify(Answer([good]), store).ok
 
     # However a span was found, a binding that does not hold at its offsets fails.
     bad = Sentence("Assets were 364,980 million.",
-                   atoms=[AtomBinding("364,980", "D", 0, 7)])
+                   atoms=[AtomBinding("364,980", "D", 0, 7, h)])
     assert not verify(Answer([bad]), store).ok

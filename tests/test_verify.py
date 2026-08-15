@@ -5,6 +5,7 @@ result is a complete record. Plus mismatch, derived recomputation, hash-drift
 (I3), and out-of-range bindings.
 """
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -29,10 +30,18 @@ def store() -> SpanStore:
 def bind(
     store: SpanStore, literal: str, line: str, *, content_hash: str | None = None
 ) -> AtomBinding:
-    """Bind a figure to its exact offset within a (uniquely resolvable) line."""
+    """Bind a figure to its exact offset within a (uniquely resolvable) line.
+
+    Defaults the corpus hash to the store's own, because that is now what a real
+    binding carries (D65): `get_span`/`get_document` return the hash they read
+    against, and a binding without one is unverifiable rather than merely unchecked.
+    Tests that exercise drift pass an explicit wrong hash.
+    """
     line_start, _ = store.resolve_quote(DOC_ID, line)
     idx = line.index(literal)
     start = line_start + idx
+    if content_hash is None:
+        content_hash = store._docs[DOC_ID].content_hash
     return AtomBinding(literal, DOC_ID, start, start + len(literal), content_hash)
 
 
@@ -61,7 +70,7 @@ def test_planted_unbound_claim_is_flagged(store):
 def test_wrong_offset_is_mismatch(store):
     """Binding the figure to the wrong column (352,583's slot) is caught."""
     good = bind(store, "364,980", TOTAL_ASSETS)
-    wrong = AtomBinding("364,980", DOC_ID, good.char_start + 10, good.char_end + 10)
+    wrong = replace(good, char_start=good.char_start + 10, char_end=good.char_end + 10)
     ans = Answer([Sentence("Total assets were $364,980 million.", atoms=[wrong])])
     result = verify(ans, store)
     assert not result.ok
@@ -80,9 +89,58 @@ def test_stale_hash_is_flagged(store):
     assert result.sentences[0].atom_verdicts[0].status == "stale_hash"
 
 
+def test_an_unhashed_binding_fails_rather_than_skipping_the_drift_check(store):
+    """D65: I3 is enforced, not offered.
+
+    The hash comparison used to run only `if binding.content_hash is not None`, so a
+    binding that omitted the hash silently skipped the corpus-drift guarantee. On the
+    first engagement it was omitted 61 times out of 61 — the check was never once
+    exercised on real work — and when the corpus moved, every offset went stale in
+    silence and the console presented genuine quotes boxed around unrelated text.
+
+    A check that cannot run is a check that failed. The bindings above still pass
+    because a real one now carries the hash `get_span`/`get_document` returned; this
+    one omits it and must not resolve.
+    """
+    real = bind(store, "364,980", TOTAL_ASSETS)
+    unhashed = replace(real, content_hash=None)
+    ans = Answer([Sentence("Total assets were $364,980 million.", atoms=[unhashed])])
+    result = verify(ans, store)
+    assert not result.ok, "an unverifiable binding must not read as verified"
+    assert result.sentences[0].atom_verdicts[0].status == "unhashed"
+
+
+def test_the_read_tools_hand_back_a_hash_a_binding_can_carry(tmp_path):
+    """The other half of D65, and the reason the check went unused for so long: no read
+    tool returned a corpus hash, so an agent had nothing to bind with. The field was
+    unreachable, not merely unpopular — a guarantee nothing could satisfy."""
+    from cairn.ingest.document import make_document
+    from cairn.ingest.store import DocumentStore
+    from cairn.tools import default_registry
+
+    ds = DocumentStore(tmp_path / "store")
+    doc = make_document("D1", "Total assets were 364,980 million at year end.")
+    ds.write(doc)
+    reg = default_registry(tmp_path / "store", audit_path=None)
+
+    span = reg["get_span"].handler({"doc_id": "D1", "start": 0, "end": 12})
+    whole = reg["get_document"].handler({"doc_id": "D1"})
+    assert span["content_hash"] == whole["content_hash"] == doc.content_hash
+
+    # …and a binding built from that read verifies end to end.
+    off = doc.canonical_text.index("364,980")
+    out = reg["verify"].handler({"answer": {"sentences": [{
+        "text": "Total assets were 364,980 million.",
+        "atoms": [{"text": "364,980", "doc_id": "D1", "char_start": off,
+                   "char_end": off + 7, "content_hash": span["content_hash"]}]}]}})
+    assert out["ok"] is True
+
+
 def test_out_of_range_is_flagged(store):
     n = len(store.get_document(DOC_ID))
-    ans = Answer([Sentence("x $1,234 y", atoms=[AtomBinding("1,234", DOC_ID, n + 1, n + 6)])])
+    h = store._docs[DOC_ID].content_hash
+    ans = Answer([Sentence("x $1,234 y",
+                           atoms=[AtomBinding("1,234", DOC_ID, n + 1, n + 6, h)])])
     result = verify(ans, store)
     assert result.sentences[0].atom_verdicts[0].status == "out_of_range"
 
@@ -221,7 +279,7 @@ def test_a_figure_asserted_twice_needs_two_bindings():
     doc = make_document("D", text)
     store = SpanStore([doc])
     i = text.index("364,980")
-    b = AtomBinding("364,980", "D", i, i + len("364,980"))
+    b = AtomBinding("364,980", "D", i, i + len("364,980"), doc.content_hash)
 
     twice = Sentence("Assets were 364,980 and liabilities were also 364,980.", atoms=[b])
     r = verify(Answer([twice]), store)
@@ -245,7 +303,7 @@ def _mini():
 
     def bind(lit):
         i = text.index(lit)
-        return AtomBinding(lit, "D", i, i + len(lit))
+        return AtomBinding(lit, "D", i, i + len(lit), store._docs["D"].content_hash)
     return store, bind
 
 

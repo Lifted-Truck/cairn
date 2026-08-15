@@ -260,10 +260,17 @@ def _normalize(s: str) -> str:
 
 
 def _resolve(binding: AtomBinding, store: SpanStore) -> AtomVerdict:
-    if binding.content_hash is not None:
-        current = content_hash(store.get_document(binding.doc_id))
-        if binding.content_hash != current:
-            return AtomVerdict(binding, "stale_hash", None)
+    # I3 is enforced, not offered. This check used to run only `if content_hash is not
+    # None`, which made the corpus-drift guarantee opt-in at the one place it is
+    # load-bearing — and on the first engagement it was taken up 0 times in 61
+    # bindings, so every offset went stale in silence and the view presented real
+    # quotes boxed around unrelated text. An unhashed binding cannot be checked for
+    # drift, and a check that cannot run is a check that failed (D65).
+    if binding.content_hash is None:
+        return AtomVerdict(binding, "unhashed", None)
+    current = content_hash(store.get_document(binding.doc_id))
+    if binding.content_hash != current:
+        return AtomVerdict(binding, "stale_hash", None)
     try:
         slice_ = store.get_span(binding.doc_id, binding.char_start, binding.char_end)
     except SpanError:
