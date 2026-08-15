@@ -725,3 +725,19 @@ _ELEMENT_MAX_WORDS = 8
 # Consumed before the subject is read — see _subject_before. Repeated because both can
 # occur ("the filter, as shown at 20").
 _CONNECTOR_TAIL = re.compile(r"(?:\s*,|\s+\bas\b|\s+\band\b)+\s*$", re.IGNORECASE)
+
+
+def claim_units(doc_id: str, text: str) -> list:
+    """Each claim as an addressable `locator.Unit`, carrying its dependency parent.
+
+    The bridge between claim parsing (here) and scope checking (`locator`): a dependent
+    claim incorporates its parent by reference, so an answer about claim 6 that cites
+    claim 1 is on-target, and the parent link is what lets the checker know it.
+    """
+    from .locator import Unit, canonical
+    return [
+        Unit(name=canonical("claim", str(c.number)), doc_id=doc_id,
+             char_start=c.char_start, char_end=c.char_end,
+             parent=canonical("claim", str(c.depends_on)) if c.depends_on else None)
+        for c in parse_claims(text)
+    ]

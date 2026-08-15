@@ -288,8 +288,15 @@ def default_registry(
         frame_json = a.get("frame")
         coverage_json = None
         if frame_json is not None:
+            # Addressable units of every cited document, so a `locator` constraint
+            # ("per claim 6") can be checked by position (D70). Built per call rather
+            # than cached: the store is small, and a stale unit index would point a
+            # scope check at offsets the corpus no longer has -- the D65 failure again.
+            from .locator import units_for
+            units = [u for d in {a.doc_id for s in answer.sentences for a in s.atoms}
+                     for u in units_for(doc_store.load(d))]
             coverage_json = coverage_to_json(
-                coverage_for_answer(frame_from_json(frame_json), answer, span_store))
+                coverage_for_answer(frame_from_json(frame_json), answer, span_store, units))
         _append(verify_record(a["answer"], result, a.get("outcome"),
                               frame_json, coverage_json))
         out = result_to_json(result)
