@@ -712,6 +712,25 @@ def _unverified_card(inter: Interaction, store: SpanStore) -> str:
     return "".join(parts)
 
 
+def _caption_tail(panel) -> str:
+    """The caption with its own label stripped off the front.
+
+    A patent caption opens by naming itself — "FIG. 2 is a perspective view…" — and the
+    strip already prints the label, so the raw form renders "FIG. 2 · FIG. 2 is a
+    perspective view…". The label is kept as the heading (it is what the reader scans
+    for) and the sentence continues from the verb. Only an exact leading match is
+    stripped, so a caption that does NOT begin with its label is left alone rather than
+    truncated on a guess.
+    """
+    cap, label = panel.caption.strip(), panel.label.strip()
+    if cap.upper().startswith(label.upper()):
+        rest = cap[len(label):].lstrip()
+        return f" {rest}" if rest else ""
+    # A shared range caption ("FIGS. 3 A-C are …") names siblings, not just this one —
+    # kept whole, because which figures share it is information the reader needs.
+    return f" · {cap}"
+
+
 def _refuse_card(inter: Interaction, seg_id) -> str:
     """A refusal: the reason, then the evidence it located, and no conclusion.
 
@@ -762,7 +781,8 @@ def render_evidence_view(
         panels = "".join(
             f'<figure class="figpanel" data-fig="{_esc(f.label)}">'
             f'<img src="{f.image}" alt="{_esc(f.label)}">'
-            f'<figcaption>{_esc(f.label)} · {_esc(f.caption)}</figcaption></figure>'
+            f'<figcaption><b>{_esc(f.label)}</b>{_esc(_caption_tail(f))}'
+            f'</figcaption></figure>'
             for f in figures
         )
         figstrip = f'<div class="figstrip">{panels}</div>'

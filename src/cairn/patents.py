@@ -380,7 +380,13 @@ _FIG_CAPTION = re.compile(
     # caption run early. On US8046721B2 that dropped FIG. 6, 9 and 10 (each recited
     # three times) because the gap across the invisible 4A-4B and 5A-5D captions
     # measured 450 > 400. Found by running the RT-6 protocol on a second patent.
-    r"FIGS?\.?\s*(\d+[A-Z]?)(?:\s*[-–]\s*\d*[A-Z]?)?\s+"
+    # The letter suffix may be SPACE-SEPARATED ("FIGS. 3 A-C are respective right,
+    # left and rear views…"). Without tolerating that space the caption does not
+    # match, so it is not seen as the next caption's boundary either — and the
+    # PRECEDING figure's caption runs on through it. On US5447630A that gave FIG. 2
+    # a caption containing the whole FIGS. 3A-C sentence, while 3A/3B/3C were left
+    # with none at all. Two visible defects, one missing space in a pattern.
+    r"FIGS?\.?\s*(\d+\s*[A-Z]?)(?:\s*[-–]\s*\d*\s*[A-Z]?)?\s+"
     r"(?:is|are|shows?|depicts?|illustrates?|comprises?|represents?)\b",
     re.IGNORECASE,
 )
@@ -571,8 +577,9 @@ def parse_figures(text: str) -> list[Figure]:
             dot = text.find(".", m.end())
             end = dot + 1 if dot != -1 else len(text)
         desc = text[m.start():end].rstrip(" ;\n\t")
-        out.append(Figure(f"FIG. {m.group(1)}", m.group(1), desc, m.start(), m.start() + len(desc)))
-        seen.add(m.group(1).upper())
+        num = re.sub(r"\s+", "", m.group(1))          # "3 A" and "3A" are one figure
+        out.append(Figure(f"FIG. {num}", num, desc, m.start(), m.start() + len(desc)))
+        seen.add(num.upper())
     # Sub-figures share a caption ("FIGS. 3 A-C are respective right, left and rear
     # views…"), so they never match the caption pattern individually — but they ARE
     # figures, need their own sheets, and must be selectable. Emit them from the
@@ -580,7 +587,12 @@ def parse_figures(text: str) -> list[Figure]:
     for r in figure_references(text):
         if r.number.upper() in seen or not r.number[-1].isalpha():
             continue
-        parent_cap = next((f for f in out if r.number.startswith(f.number)), None)
+        # Match on the NUMERIC stem, not the whole string: "3B" must find the caption
+        # emitted for "3A" (the "FIGS. 3 A-C" range), which a string prefix never does.
+        stem = re.match(r"\d+", r.number)
+        parent_cap = next(
+            (f for f in out if stem and re.match(r"\d+", f.number)
+             and re.match(r"\d+", f.number).group(0) == stem.group(0)), None)
         desc = parent_cap.description if parent_cap else ""
         out.append(Figure(f"FIG. {r.number}", r.number, desc, r.char_start, r.char_end))
         seen.add(r.number.upper())
