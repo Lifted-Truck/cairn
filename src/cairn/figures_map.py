@@ -433,6 +433,24 @@ def load_manifest(store_dir: str | Path) -> dict:
     return manifest
 
 
+# How near a judgment's coordinates must be to the mark it names. Deliberately the
+# same 0.02 as `merge_same_spot_numerals`: both answer "are these the same mark?", and
+# two different answers to one question is how a refutation misses its target.
+_MARK_RADIUS = 0.02
+
+
+def _without_mark(numerals: list[dict], target: dict) -> list[dict]:
+    """Drop the mark a judgment names — same label, within `_MARK_RADIUS` of the spot.
+
+    Position is part of the identity because one numeral legitimately appears several
+    times on a sheet; refuting the phantom "12" must not delete the real one.
+    """
+    return [n for n in numerals
+            if not (str(n["numeral"]) == str(target.get("numeral"))
+                    and abs(n["x"] - target.get("x", -9)) < _MARK_RADIUS
+                    and abs(n["y"] - target.get("y", -9)) < _MARK_RADIUS)]
+
+
 def apply_adjudications(manifest: dict, fig_dir: str | Path) -> dict:
     """Fold the reviewer's effective judgments into the manifest view (D47)."""
     from .adjudication import CONFIRM, CORRECT, REFUTE, AdjudicationLog
@@ -454,14 +472,18 @@ def apply_adjudications(manifest: dict, fig_dir: str | Path) -> dict:
             continue
         if a.kind == REFUTE:
             # The reviewer says the tool located something that is not on the sheet.
-            page["numerals"] = [
-                n for n in page["numerals"]
-                if not (str(n["numeral"]) == str(a.target.get("numeral"))
-                        and abs(n["x"] - a.target.get("x", -9)) < 0.02
-                        and abs(n["y"] - a.target.get("y", -9)) < 0.02)]
+            page["numerals"] = _without_mark(page["numerals"], a.target)
             continue
         if a.kind not in (CONFIRM, CORRECT):
             continue                 # a note asserts nothing about the marks
+        if a.kind == CORRECT:
+            # A correction REPLACES; it used to only append. Correcting a misread
+            # "14a" to "12A" left both on the sheet — the wrong mark the reviewer had
+            # just rejected, beside the right one — so the reconciliation still
+            # reported the phantom and the reviewer's fix made the record worse, not
+            # better. A correction is a refutation plus an assertion, and both halves
+            # have to land.
+            page["numerals"] = _without_mark(page["numerals"], a.target)
         src = a.value if a.kind == CORRECT else a.target
         page["numerals"].append({
             "numeral": src.get("numeral", a.target.get("numeral")),

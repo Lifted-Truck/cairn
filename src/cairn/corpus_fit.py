@@ -119,6 +119,18 @@ FITTED: list[FittedConstant] = [
         "answerable question. Does not transfer. RT-9 tracks the missing mechanism.",
     ),
     FittedConstant(
+        "figures_map._MARK_RADIUS", 0.02, CORPUS,
+        "How near a reviewer's judgment coordinates must be to the mark it names, for a "
+        "refutation or correction to find its target. Deliberately the same value as "
+        "`merge_same_spot_numerals(radius=)` — both answer 'are these the same mark?', "
+        "and the two must not drift apart.",
+        "Any denser sheet, and for the same reason as the merge radius: too large and a "
+        "refutation deletes a NEIGHBOURING mark the reviewer did not judge; too small "
+        "and it silently misses, leaving the phantom in place while the log records that "
+        "a human rejected it — the worse failure, because the record then disagrees with "
+        "the sheet. Re-measure with the merge radius, never separately.",
+    ),
+    FittedConstant(
         "patents._ELEMENT_MAX_WORDS", 8, DOMAIN,
         "Word cap on the element phrase recovered for a pointer construction ('…as "
         "shown at 20'). The subject is bounded by the nearest sentence break or comma, "

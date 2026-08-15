@@ -632,3 +632,47 @@ def test_a_180_read_over_an_upright_mark_is_the_same_ink():
     assert len(drop_strobogrammatic_twins([real, far], [real])) == 2
     upright_too = {**phantom, "angles": [0, 180]}     # legible upright: never dropped
     assert len(drop_strobogrammatic_twins([real, upright_too], [real])) == 2
+
+
+def test_a_correction_replaces_the_mark_it_corrects(tmp_path):
+    """D69: a correction is a refutation plus an assertion, and both halves must land.
+
+    `apply_adjudications` only ever APPENDED the corrected mark, so correcting a
+    misread "14a" to "12A" left both on the sheet — the phantom the reviewer had just
+    rejected, sitting beside the fix. The reconciliation went on reporting the phantom,
+    which means the reviewer's correction made the record worse than leaving it alone.
+    """
+    from cairn.adjudication import Adjudication, AdjudicationLog
+    from cairn.figures_map import apply_adjudications
+
+    log = AdjudicationLog(tmp_path / "adjudications.jsonl")
+    log.append(Adjudication(
+        adj_id="a::correct::2026-08-15", kind="correct", target_kind="figure-numeral",
+        target={"page": 2, "numeral": "14a", "x": 0.5, "y": 0.3},
+        value={"numeral": "12A", "x": 0.5, "y": 0.3, "w": 0.02, "h": 0.015},
+        by="J. Smith", on="2026-08-15", note="misread"))
+    man = {"pages": [{"page": 2, "numerals": [
+        {"numeral": "14a", "x": 0.5, "y": 0.3, "w": 0.02, "h": 0.015,
+         "confidence": 0.7, "engines": ["tesseract"]}]}]}
+
+    labels = [n["numeral"] for n in apply_adjudications(man, tmp_path)["pages"][0]["numerals"]]
+    assert labels == ["12A"], "the corrected mark must not survive alongside its fix"
+
+
+def test_a_refutation_spares_the_same_numeral_elsewhere_on_the_sheet(tmp_path):
+    """One numeral legitimately appears several times on a sheet, so position is part
+    of a mark's identity. Refuting the phantom must not delete the real one."""
+    from cairn.adjudication import Adjudication, AdjudicationLog
+    from cairn.figures_map import apply_adjudications
+
+    log = AdjudicationLog(tmp_path / "adjudications.jsonl")
+    log.append(Adjudication(
+        adj_id="b::refute::2026-08-15", kind="refute", target_kind="figure-numeral",
+        target={"page": 2, "numeral": "12", "x": 0.10, "y": 0.10},
+        by="J. Smith", on="2026-08-15", note="not on the sheet"))
+    man = {"pages": [{"page": 2, "numerals": [
+        {"numeral": "12", "x": 0.10, "y": 0.10, "w": 0.02, "h": 0.015, "confidence": 0.4},
+        {"numeral": "12", "x": 0.80, "y": 0.70, "w": 0.02, "h": 0.015, "confidence": 1.0}]}]}
+
+    left = apply_adjudications(man, tmp_path)["pages"][0]["numerals"]
+    assert len(left) == 1 and left[0]["x"] == 0.80
