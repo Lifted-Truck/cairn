@@ -8,9 +8,16 @@ the guards that pay for it are tested, not assumed.
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 
-from cairn.serve import NotLoopback, origin_allowed, require_loopback
+from cairn.serve import (
+    NotLoopback,
+    origin_allowed,
+    require_loopback,
+    serve,
+)
 
 pytestmark = pytest.mark.layer0
 
@@ -79,3 +86,26 @@ def test_recording_needs_a_named_reviewer_and_a_date():
     from cairn import serve as serve_mod
     src = inspect.getsource(serve_mod)
     assert "if adj_log is None or not reviewer or not on:" in src
+
+
+def test_console_pages_are_never_cached(tmp_path):
+    """The console is rebuilt in place at the same URLs, so a cached page shows
+    findings that are no longer true with nothing on it admitting the page is old.
+    This cost a real review round — the evidence pane was reported still broken when
+    the file on disk had been correct for an hour."""
+    import urllib.request
+    (tmp_path / "index.html").write_text("<p>v1</p>", encoding="utf-8")
+    srv = serve({}, tmp_path, port=0)
+    port = srv.server_address[1]
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/index.html") as r:
+            assert "no-store" in r.headers.get("Cache-Control", "")
+            assert r.read() == b"<p>v1</p>"
+        # a rebuild at the same URL is visible on the next request
+        (tmp_path / "index.html").write_text("<p>v2</p>", encoding="utf-8")
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/index.html") as r:
+            assert r.read() == b"<p>v2</p>"
+    finally:
+        srv.shutdown()

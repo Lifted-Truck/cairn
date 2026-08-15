@@ -94,6 +94,21 @@ def make_handler(tools: dict[str, Tool], root: Path, port: int, *,
         def log_message(self, fmt, *args):        # quiet by default; the audit log is the record
             pass
 
+        def end_headers(self) -> None:
+            """Never let a browser cache a console page.
+
+            The console is rebuilt constantly — a fixed defect, a fresh session, a new
+            judgment — and every rebuild rewrites these files in place at the same URLs.
+            `SimpleHTTPRequestHandler` sends `Last-Modified` and no `Cache-Control`,
+            which invites heuristic caching, so a reviewer reloads and sees the page
+            from *before* the fix. That already cost a review round: the evidence pane
+            was read as still broken when the file on disk had been correct for an hour.
+            A stale review surface is worse than a slow one — it shows findings that are
+            no longer true, and nothing on the page admits it is old.
+            """
+            self.send_header("Cache-Control", "no-store, must-revalidate")
+            super().end_headers()
+
         def _json(self, code: int, body: dict) -> None:
             blob = json.dumps(body).encode("utf-8")
             self.send_response(code)
