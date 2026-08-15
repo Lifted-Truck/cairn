@@ -56,8 +56,14 @@ def _crop(item, sheet_files: dict[int, str]) -> str:
     """
     file = sheet_files.get(item.page) if item.page is not None else None
     if file is None or item.x is None or item.y is None:
-        why = ("nothing to show — this numeral was not located on any sheet, which is "
-               "the flag itself" if item.page is None else
+        if item.page is None and sheet_files:
+            # No coordinates BECAUSE nothing was located — so the useful move is not to
+            # explain the absence but to let the reviewer supply what OCR missed, here,
+            # against the whole sheet. Telling them "not located" and stopping sends
+            # them to another pane to do the one thing this row is asking for.
+            return _locate_surface(item, sheet_files)
+        why = ("nothing to show — this numeral was not located on any sheet, and no "
+               "drawing sheets are available to search" if item.page is None else
                f"no sheet image available for page {item.page}")
         return f"<p class='nocrop'>{_e(why)}</p>"
     d = box_to_display(item.x, item.y, item.w or 0.0, item.h or 0.0)
@@ -71,6 +77,36 @@ def _crop(item, sheet_files: dict[int, str]) -> str:
             f"({cx:.3f}, {cy:.3f} from the top-left) — the ring is where OCR placed "
             f"<b>{_e(item.label)}</b>. Zoom, or open the Drawings pane for the "
             f"whole sheet.</p>")
+
+
+def _locate_surface(item, sheet_files: dict[int, str]) -> str:
+    """Pick a sheet, drag a box, record where the numeral actually is.
+
+    A `recited_not_drawn` row says the specification recites a numeral that OCR could
+    not find on any sheet — an OCR miss and a drawing omission are indistinguishable
+    from here (D10), and only a human can tell them apart by looking. So this is the
+    row that most needs a drawing surface, and it was the one row that had none.
+
+    Pixels only: the box is sent as browser pixels plus the displayed image size, and
+    the conversion to manifest coordinates happens server-side in Python where a
+    Layer-0 test reaches it (D51). The page never invents a normalized coordinate.
+    """
+    opts = "".join(
+        f"<option value='{_e(p)}' data-file='{_e(f)}'>p.{_e(p)}</option>"
+        for p, f in sorted(sheet_files.items()))
+    return (
+        "<div class='locate'>"
+        f"<p class='nocrop'>Not located by OCR on any sheet. If you can see "
+        f"<b>{_e(item.label)}</b> on a drawing, box it here and the location becomes "
+        f"part of the record.</p>"
+        "<div class='lbar'>"
+        f"<select class='lpage'>{opts}</select>"
+        "<button type='button' class='lopen'>Show the sheet</button>"
+        "<button type='button' class='lsave' disabled>Record this location</button>"
+        "<button type='button' class='lclear ghost'>Clear box</button>"
+        "</div>"
+        "<div class='lstage' hidden><img alt='drawing sheet'><div class='lrect'></div></div>"
+        "</div>")
 
 
 def render(items, *, reviewer: str | None, on: str | None,
@@ -161,6 +197,16 @@ button:disabled{opacity:.5;cursor:default}
 .crop .zoom{position:absolute;right:6px;bottom:6px;display:flex;gap:4px}
 .crop .zoom button{padding:1px 8px;font:600 13px var(--mono);opacity:.9}
 .cropcap{margin:0 0 11px;font:12px var(--sans);color:var(--mut);max-width:72ch}
+.locate{margin:0 0 11px}
+.lbar{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:0 0 8px}
+.lbar select{padding:5px 8px;border:1px solid var(--rule);border-radius:6px;
+ background:var(--bg);color:var(--ink);font:13px var(--sans)}
+.lbar button{padding:5px 11px;font-size:12.5px}
+.lstage{position:relative;display:inline-block;max-width:100%;
+ border:1px solid var(--rule);border-radius:6px;overflow:hidden;background:#fff}
+.lstage img{display:block;max-width:100%;height:auto;touch-action:none}
+.lrect{position:absolute;border:2px solid #c8402c;background:rgba(200,64,44,.14);
+ pointer-events:none;display:none}
 .nocrop{margin:0 0 11px;font:12.5px var(--sans);color:var(--mut);
  padding:8px 11px;background:var(--bg);border:1px dashed var(--rule);border-radius:6px}
 .empty{background:var(--panel);border:1px solid var(--rule);border-radius:9px;
@@ -230,6 +276,75 @@ fetch('judged').then(r => r.json()).then(d => {
   const h = document.querySelector('h1');
   if (h) h.textContent = `Needs a human — ${left} outstanding`;
 }).catch(() => {});   // no server: the page still reads, it just cannot reconcile
+
+// Locate-it-yourself, for a row OCR could not place. Pixels only -- the conversion
+// to manifest coordinates lives in Python (D51), so the page never computes one.
+document.querySelectorAll('.locate').forEach(loc => {
+  const li = loc.closest('.item');
+  const sel = loc.querySelector('.lpage'), stage = loc.querySelector('.lstage');
+  const img = stage.querySelector('img'), rect = loc.querySelector('.lrect');
+  const save = loc.querySelector('.lsave'), said = li.querySelector('.said');
+  let box = null, drag = null;
+  const clear = () => { box = null; rect.style.display = 'none'; save.disabled = true; };
+  const show = () => {
+    const o = sel.selectedOptions[0];
+    if (o) { img.src = 'sheets/' + o.dataset.file; stage.hidden = false; clear(); }
+  };
+  loc.querySelector('.lopen').addEventListener('click', show);
+  loc.querySelector('.lclear').addEventListener('click', clear);
+  sel.addEventListener('change', () => { if (!stage.hidden) show(); });
+  const at = ev => {
+    const r = img.getBoundingClientRect();
+    return {x: Math.max(0, Math.min(ev.clientX - r.left, r.width)),
+            y: Math.max(0, Math.min(ev.clientY - r.top, r.height))};
+  };
+  img.addEventListener('pointerdown', ev => {
+    ev.preventDefault(); drag = at(ev); img.setPointerCapture(ev.pointerId);
+  });
+  img.addEventListener('pointermove', ev => {
+    if (!drag) return;
+    const p = at(ev);
+    Object.assign(rect.style, {display: 'block',
+      left: Math.min(drag.x, p.x) + 'px', top: Math.min(drag.y, p.y) + 'px',
+      width: Math.abs(p.x - drag.x) + 'px', height: Math.abs(p.y - drag.y) + 'px'});
+  });
+  img.addEventListener('pointerup', ev => {
+    if (!drag) return;
+    const p = at(ev), r = img.getBoundingClientRect();
+    box = {x0: drag.x, y0: drag.y, x1: p.x, y1: p.y, width: r.width, height: r.height};
+    drag = null;
+    save.disabled = !(Math.abs(box.x1 - box.x0) > 3 && Math.abs(box.y1 - box.y0) > 3);
+    said.className = 'said' + (save.disabled ? ' bad' : '');
+    said.textContent = save.disabled
+      ? 'That is a click, not a box \u2014 drag across the numeral.' : '';
+  });
+  save.addEventListener('click', async () => {
+    if (!box) return;
+    save.disabled = true; said.className = 'said'; said.textContent = 'recording\u2026';
+    try {
+      const r = await fetch('adjudicate', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          item_id: li.dataset.id, kind: 'confirm',
+          target: {page: Number(sel.value), numeral: JSON.parse(li.dataset.target).numeral},
+          box_px: box, note: 'located on the sheet by the reviewer'})
+      });
+      const d = await r.json();
+      if (d.error) {
+        said.className = 'said bad'; said.textContent = d.error; save.disabled = false;
+      } else {
+        said.textContent = 'recorded as ' + d.by + ' on ' + d.on +
+          ' \u2014 rebuild the console to see it on the sheet.';
+        li.classList.add('done');
+        li.querySelectorAll('button').forEach(b => b.disabled = true);
+      }
+    } catch (e) {
+      said.className = 'said bad';
+      said.textContent = 'no review server \u2014 start scripts/serve_console.py';
+      save.disabled = false;
+    }
+  });
+});
 
 document.querySelectorAll('.item .acts button').forEach(btn => {
   btn.addEventListener('click', async () => {

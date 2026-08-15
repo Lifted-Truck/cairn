@@ -125,14 +125,15 @@ def test_each_located_row_shows_the_sheet_where_the_question_is_asked():
     assert "sheets/" in page, "the crop reads the sheet copied beside the console"
 
 
-def test_a_row_with_no_location_says_so_instead_of_framing_empty_space():
+def test_a_row_with_no_location_never_frames_empty_space():
     """A recited-not-drawn flag has no coordinates by construction — that absence IS the
-    finding. An empty frame would read as "looked here, found nothing", which asserts a
-    location the system does not have."""
+    finding. It must never get a crop: an empty frame reads as "looked here, found
+    nothing", which asserts a location the system does not have. It states the absence,
+    and (D75) offers a surface to supply what OCR missed."""
     q = build(_cov(recited_not_drawn=["77"]), [])
     page = pane(q, reviewer="J. Smith", on="2026-07-28", sheet_files={2: "p2.png"})
     assert "class='crop'" not in page
-    assert "not located on any sheet" in page
+    assert "Not located by OCR on any sheet" in page
 
 
 def test_the_crop_is_omitted_when_the_sheet_image_is_missing():
@@ -142,3 +143,28 @@ def test_the_crop_is_omitted_when_the_sheet_image_is_missing():
     page = pane(q, reviewer="J. Smith", on="2026-07-28", sheet_files={})
     assert "class='crop'" not in page
     assert "no sheet image available for page 2" in page
+
+
+def test_an_unlocated_numeral_gets_a_surface_to_draw_it_on():
+    """D75: a `recited_not_drawn` row says the spec recites a numeral OCR could not
+    find on any sheet. An OCR miss and a drawing omission are indistinguishable from
+    there (D10) and only a human can tell them apart by looking — so this is the row
+    that most needs a drawing surface, and it was the one row that had none. Telling
+    the reviewer "not located" and stopping sent them to another pane to do the one
+    thing the row is asking for."""
+    q = build(_cov(recited_not_drawn=["77"]), [])
+    page = pane(q, reviewer="J. Smith", on="2026-08-15",
+                sheet_files={2: "p2.png", 3: "p3.png"})
+    assert "class='locate'" in page
+    assert "data-file='p2.png'" in page and "data-file='p3.png'" in page   # any sheet
+    assert "Record this location" in page
+    assert "box_px" in page, "the box is sent as pixels; Python does the conversion (D51)"
+
+
+def test_no_sheets_means_no_drawing_surface_and_says_why():
+    """With no drawings available there is nothing to draw on, and the row says that
+    rather than offering a control that cannot work."""
+    q = build(_cov(recited_not_drawn=["77"]), [])
+    page = pane(q, reviewer="J. Smith", on="2026-08-15", sheet_files={})
+    assert "class='locate'" not in page
+    assert "no drawing sheets are available" in page
