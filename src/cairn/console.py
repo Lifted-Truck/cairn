@@ -49,6 +49,10 @@ class ConsoleState:
     calibrated: bool
     contract: str
     adjudications: int = 0
+    # Open questions of MEANING (D77). Carried in the header because an
+    # unresolved reading changes how every other pane should be read, and a
+    # count that lives only on one tab is a count nobody sees.
+    ambiguities: int = 0
     flags: int | None = None            # outstanding discrepancies, None = not applicable
     generated_on: str = ""
     panes: list[Pane] = field(default_factory=list)
@@ -92,6 +96,8 @@ def render(state: ConsoleState) -> str:
         cal_short=_e("calibrated" if state.calibrated else "NOT calibrated"),
         calibration=_e(state.calibration),
         adj=state.adjudications,
+        ambs=("<span class='stat warn'><b>%d</b> open reading(s)</span>"
+              % state.ambiguities) if state.ambiguities else "",
         flags=flags,
         tabs="".join(tabs),
         bodies="".join(bodies),
@@ -166,6 +172,7 @@ iframe{{width:100%;height:100%;border:0;background:var(--panel)}}
     <span class="stats">
       <span class="stat">contract v{contract}</span>
       <span class="stat"><b>{adj}</b> adjudication(s)</span>
+      {ambs}
       {flags}
       <span class="stat {cal_cls}">{cal_short}</span>
     </span>

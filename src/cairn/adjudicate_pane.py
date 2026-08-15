@@ -109,8 +109,52 @@ def _locate_surface(item, sheet_files: dict[int, str]) -> str:
         "</div>")
 
 
+def _ambiguities(ambs) -> str:
+    """The interpretation queue (D77) — a fork, its evidence, and a recommendation.
+
+    Kept above the location queue and visually apart from it, because the two ask
+    different things. "Is 20 drawn here?" is a question about a sheet; "does 20 mean
+    the part or a measurement?" is a question about the document's language, and
+    answering the second changes how the first is read. Nothing is pre-selected: the
+    recommendation is labelled as one and carries no default.
+    """
+    if not ambs:
+        return ("<section class='ambs'><h2>Interpretation</h2>"
+                "<p class='empty'><b>No open questions of meaning.</b> That is not the "
+                "same as none existing — these come from two mechanisms disagreeing "
+                "about a token, so a misreading both share is invisible here.</p>"
+                "</section>")
+    rows = []
+    for a in ambs:
+        ev = ""
+        if a.where.get("recited_as"):
+            ev = (f"<p class='ev'><b>as a part:</b> {_e(a.where['recited_as'])}</p>"
+                  f"<p class='ev'><b>as a quantity:</b> {_e(a.where['quantity_as'])}</p>")
+        opts = "".join(
+            "<button data-value='{v}'{c}>{v}<span>{r}</span></button>".format(
+                v=_e(o.value), r=_e(o.rationale),
+                c=" class='rec'" if o.value == a.proposed else "")
+            for o in a.options)
+        rec = (f"<p class='rec-note'>Cairn suggests <b>{_e(a.proposed)}</b> — a "
+               f"recommendation from the deterministic signals, not a finding. "
+               f"Nothing is applied until you choose.</p>" if a.proposed else "")
+        rows.append(
+            f"<li class='amb' data-id='{_e(a.amb_id)}' "
+            f"data-proposed='{_e(a.proposed)}' data-target='{_e(json.dumps(a.where))}'>"
+            f"<div class='hd'><span class='kind k-{_e(a.kind)}'>"
+            f"{_e(a.kind.replace('_', ' '))}</span>"
+            f"<span class='lbl'>{_e(a.label)}</span></div>"
+            f"<p class='q'>{_e(a.question)}</p><p class='d'>{_e(a.detail)}</p>"
+            f"{ev}{rec}<div class='opts'>{opts}<span class='said'></span></div></li>")
+    return (f"<section class='ambs'><h2>Interpretation — {len(ambs)} open</h2>"
+            "<p class='sub'>Each is a place two mechanisms disagree about what a token "
+            "means. Resolving one feeds back into what the drawings and the evidence "
+            "view show; leaving it open blocks nothing, and is stated on the Record.</p>"
+            f"<ul>{''.join(rows)}</ul></section>")
+
+
 def render(items, *, reviewer: str | None, on: str | None,
-           sheet_files: dict[int, str] | None = None) -> str:
+           sheet_files: dict[int, str] | None = None, ambiguities=()) -> str:
     """`sheet_files` maps page → the sheet image beside the console (`sheets/<file>`).
 
     Without it the queue asks "is 20 really drawn here?" and shows nothing to look at,
@@ -148,6 +192,7 @@ def render(items, *, reviewer: str | None, on: str | None,
              "anything absent from both is invisible to all of them.</li>")
     return _PAGE.replace("{{ROWS}}", "".join(rows) or empty) \
                 .replace("{{WHO}}", who) \
+                .replace("{{AMBS}}", _ambiguities(list(ambiguities))) \
                 .replace("{{N}}", str(len(items)))
 
 
@@ -186,6 +231,21 @@ button{padding:6px 13px;border:1px solid var(--rule);border-radius:6px;backgroun
 button:hover{border-color:var(--accent)}
 button.ghost{font-weight:400;color:var(--mut)}
 button:disabled{opacity:.5;cursor:default}
+h2{font:600 15px/1.3 var(--sans);margin:26px 0 4px}
+.loc-h{margin-top:30px}
+.ambs{margin:0 0 6px}
+.amb{background:var(--panel);border:1px solid var(--rule);border-left:3px solid var(--accent);
+ border-radius:9px;padding:14px 16px;margin:0 0 11px}
+.amb.done{opacity:.55}
+.amb .kind{background:#2f4f8f22;color:var(--accent)}
+.ev{margin:3px 0;font:12px var(--mono);color:var(--mut);padding-left:10px;
+ border-left:2px solid var(--rule)}
+.rec-note{margin:9px 0 7px;font-size:12.5px;color:var(--mut)}
+.opts{display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap}
+.opts button{display:block;text-align:left;max-width:230px;padding:7px 11px}
+.opts button.rec{border-color:var(--accent)}
+.opts button span{display:block;font-weight:400;font-size:11.5px;color:var(--mut);
+ margin-top:2px;line-height:1.35}
 .said{font-size:12.5px;color:var(--ok)}
 .said.bad{color:var(--warn)}
 .crop{position:relative;width:100%;max-width:420px;height:190px;overflow:hidden;
@@ -220,6 +280,8 @@ button:disabled{opacity:.5;cursor:default}
   pre-selected and there is no bulk accept: a queue that can be cleared without reading it
   produces a record saying someone looked when nobody did.</p>
   <p class="who">{{WHO}}</p>
+  {{AMBS}}
+  <h2 class="loc-h">Location — {{N}} outstanding</h2>
   <ul id="q">{{ROWS}}</ul>
   <p class="note">Every judgment is appended to a hash-chained record with your name and
   the date. Nothing is edited or deleted — a later change of mind is a new entry that
@@ -276,6 +338,43 @@ fetch('judged').then(r => r.json()).then(d => {
   const h = document.querySelector('h1');
   if (h) h.textContent = `Needs a human — ${left} outstanding`;
 }).catch(() => {});   // no server: the page still reads, it just cannot reconcile
+
+// Interpretation queue. The chosen reading is recorded as a human judgment; the
+// recommendation is never applied on its own, and agreeing with it is recorded as
+// agreement (confirm) rather than as the machine having been right (D77).
+document.querySelectorAll('.amb .opts button').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const li = btn.closest('.amb'), said = li.querySelector('.said');
+    const value = btn.dataset.value;
+    li.querySelectorAll('button').forEach(b => b.disabled = true);
+    said.className = 'said'; said.textContent = 'recording\u2026';
+    try {
+      const r = await fetch('adjudicate', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          item_id: li.dataset.id,
+          kind: value === li.dataset.proposed ? 'confirm' : 'correct',
+          target_kind: 'ambiguity',
+          target: Object.assign({amb_id: li.dataset.id}, JSON.parse(li.dataset.target)),
+          value: {reading: value},
+          note: 'reviewer resolved the reading as: ' + value})
+      });
+      const d = await r.json();
+      if (d.error) {
+        said.className = 'said bad'; said.textContent = d.error;
+        li.querySelectorAll('button').forEach(b => b.disabled = false);
+      } else {
+        said.textContent = 'resolved as \u201c' + value + '\u201d by ' + d.by +
+          ' on ' + d.on + ' \u2014 rebuild the console to feed it back.';
+        li.classList.add('done');
+      }
+    } catch (e) {
+      said.className = 'said bad';
+      said.textContent = 'no review server \u2014 start scripts/serve_console.py';
+      li.querySelectorAll('button').forEach(b => b.disabled = false);
+    }
+  });
+});
 
 // Locate-it-yourself, for a row OCR could not place. Pixels only -- the conversion
 // to manifest coordinates lives in Python (D51), so the page never computes one.

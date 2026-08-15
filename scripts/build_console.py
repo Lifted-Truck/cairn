@@ -36,6 +36,42 @@ from cairn.review_queue import build as build_queue
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def _ambiguities_for(store_dir: Path, doc_id: str, adj_path: Path) -> list:
+    """Open questions of MEANING (D77) — where two mechanisms disagree about a token.
+
+    Read from the same reconciliation the location queue uses, minus anything the
+    reviewer has already ruled on, so the panel is a view over outstanding work while
+    the rulings themselves live in the append-only log.
+    """
+    from cairn.adjudication import AdjudicationLog
+    from cairn.ambiguity import collect, resolutions
+    from cairn.figures_map import (
+        fig_to_sheets,
+        load_manifest,
+        numeral_coverage,
+        numeral_sightings,
+    )
+    from cairn.patents import (
+        figure_references,
+        numeral_mentions,
+        parse_figures,
+        reference_numerals,
+    )
+    from cairn.spans import SpanStore
+
+    store = SpanStore.from_store(DocumentStore(store_dir))
+    text = store.get_document(doc_id)
+    manifest = load_manifest(store_dir)
+    sightings = numeral_sightings(manifest)
+    assigns = fig_to_sheets(manifest, [f.number for f in parse_figures(text)])
+    cov = numeral_coverage(reference_numerals(text), text, figure_references(text),
+                           assigns, sightings)
+    log = AdjudicationLog(adj_path)
+    done = set(resolutions(log)) if adj_path.exists() else set()
+    return collect(text=text, mentions=numeral_mentions(text), coverage=cov,
+                   assignments=assigns, resolved=done)
+
+
 def _queue_for(store_dir: Path, doc_id: str, adjudicated: set[str]) -> list:
     """The outstanding worklist, from the same reconciliation the Drawings pane shows."""
     from cairn.figures_map import (
@@ -128,10 +164,12 @@ def main() -> int:
 
     # The queue is derived from the same reconciliation the Drawings pane reports, so a
     # tally there and a worklist here can never disagree.
+    ambiguities = []
     queue = []
     if ok_figures:
         try:
             queue = _queue_for(store_dir, ns.doc, adj_ids)
+            ambiguities = _ambiguities_for(store_dir, ns.doc, adj_path)
         except Exception as e:                    # noqa: BLE001 — reported, not fatal
             print(f"  ✗ review queue: {type(e).__name__}: {e}")
 
@@ -159,6 +197,7 @@ def main() -> int:
         calibration=calibration, calibrated=is_calibrated,
         stale=bool(rec and not rec.separable),
         fitted_untested=untested, sheets=n_sheets, adjudications=adjudications,
+        ambiguities=len(ambiguities),
         chain_ok=True), encoding="utf-8")
 
     panes = [
@@ -234,7 +273,8 @@ def main() -> int:
         # where it is asked rather than in another pane.
         (out / "adjudicate.html").write_text(
             adjudicate_pane(queue, reviewer=ns.reviewer, on=judged_on,
-                            sheet_files={s["page"]: s["file"] for s in sheets}),
+                            sheet_files={s["page"]: s["file"] for s in sheets},
+                            ambiguities=ambiguities),
             encoding="utf-8")
     (out / "index.html").write_text(render(state), encoding="utf-8")
     built = [p.label for p in panes if p.page]

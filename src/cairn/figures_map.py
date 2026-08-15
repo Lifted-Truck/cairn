@@ -467,6 +467,13 @@ def apply_adjudications(manifest: dict, fig_dir: str | Path) -> dict:
 
     by_page = {p["page"]: p for p in manifest["pages"]}
     for a in judgments:
+        # Only marks-on-sheets judgments touch the manifest. The log now also carries
+        # INTERPRETIVE rulings (D77) whose targets name a page but assert nothing about
+        # a mark — confirming "FIG. 6 is on sheet p.7" would otherwise inject a numeral
+        # called "6" onto that sheet. One log, several target kinds, and each consumer
+        # must read only its own.
+        if a.target_kind != "figure-numeral":
+            continue
         page = by_page.get(a.target.get("page"))
         if page is None:
             continue

@@ -436,8 +436,15 @@ _NUMERAL = re.compile(
     r"\b((?:the |a |an |said )?(?:[a-z]+ ){0,2}[a-z]+)[)\]]?\s+"
     rf"({_LABEL_RE})(?![\dA-Za-z])(?!\.\d)"
 )
+# `in` is the inches ABBREVIATION only when written "in." — bare `in` is the
+# preposition, and treating it as a unit silently discarded real recitations: "the
+# separator 10 in the assembled condition", "the ram 14 in order to advance", "FIG. 4
+# in the assembled condition" were all read as quantities and dropped. On US5447630A
+# the bare form occurs 3 times and the abbreviation 0 times, so the rule was wrong
+# every time it fired. Found by building the ambiguity panel, which surfaced the three
+# as numeral-vs-quantity collisions and made the mistake visible (D77).
 _UNIT_AFTER = re.compile(
-    r"^\s*(?:W|watts?|mm|cm|m|in|inch(?:es)?|ft|kg|lbs?|°|degrees?|%|percent|hours?|"
+    r"^\s*(?:W|watts?|mm|cm|m|in\.|inch(?:es)?|ft|kg|lbs?|°|degrees?|%|percent|hours?|"
     r"minutes?|seconds?|volts?|V|Hz|psi|gal|gallons?|l(?:iters?)?|N\.T\.U\.|mg)\b",
     re.IGNORECASE,
 )
