@@ -220,6 +220,64 @@ def test_reference_numerals_map_number_to_element():
     assert "sprocket" in nums["12"] and "controller" in nums["14"]
 
 
+def test_pointer_constructions_recite_a_numeral():
+    """Defect D, made a standing test.
+
+    "…as shown at 20" and "…indicated schematically at 43" are the idiomatic way a
+    specification introduces a reference numeral, and both were invisible: the main
+    pattern reads the words just before the numeral as the element, and there those
+    words are "shown at" / "at", which _NOT_ELEMENT rejects — correctly, since that is
+    the same guard that stops "at temperatures exceeding 500" binding a quantity.
+
+    The cost was not a missing legend entry but a FALSE FINDING: with 20 absent from
+    the text list, the drawing/spec reconciliation reported "numeral 20 appears on
+    sheet 2 but is never recited in the specification — review", against a numeral
+    plainly recited. On a locate-and-evidence tool a fabricated discrepancy is the
+    expensive kind of wrong.
+    """
+    from cairn.patents import reference_numerals
+    text = (
+        "DESCRIPTION\n"
+        'A ceramic particulate "scrubber" or filter is provided as shown at 20, such '
+        "that airborne particulates are trapped.\n"
+        "The dosing siphon, indicated schematically at 43, includes a float.\n"
+        "The lower chamber has a maximum diameter of 20 inches.\n"
+        "\nWhat is claimed is:\n\n1. A system.\n"
+    )
+    nums = {n.number: n.element for n in reference_numerals(text)}
+    assert "20" in nums and "43" in nums
+    assert "scrubber" in nums["20"], nums["20"]        # subject recovered across "as"
+    assert nums["43"] == "dosing siphon"              # …and across the appositive comma
+    for element in nums.values():                      # no lead-in leaks into an element
+        assert not element.lower().startswith(("shown", "indicated", "as "))
+
+
+def test_a_pointer_lead_in_never_binds_a_quantity():
+    """The guard the pointer pass must not undo: a measurement is not a part. "20
+    inches" and "500 W" stay out even when a pointer verb is nearby."""
+    from cairn.patents import reference_numerals
+    text = ("DESCRIPTION\nThe chamber, shown at 12, operates at temperatures "
+            "exceeding 500 W and has a diameter of 20 inches.\n"
+            "\nWhat is claimed is:\n\n1. A system.\n")
+    nums = {n.number for n in reference_numerals(text)}
+    assert "12" in nums
+    assert "500" not in nums and "20" not in nums
+
+
+def test_a_runaway_element_phrase_is_clipped_not_dropped():
+    """A pointer whose subject is a whole clause yields a long phrase. It is truncated
+    head-final, never discarded: a loose element is visible to a reviewer, a dropped
+    numeral is not — the trade this module makes everywhere else."""
+    from cairn.patents import reference_numerals
+    text = ("DESCRIPTION\nLiquids exit the vessel and travel onward through the "
+            "primary and secondary outlet manifolds designated at 56.\n"
+            "\nWhat is claimed is:\n\n1. A system.\n")
+    nums = {n.number: n.element for n in reference_numerals(text)}
+    assert "56" in nums, "the numeral must survive a bad element phrase"
+    assert len(nums["56"].split()) <= 8
+    assert "manifolds" in nums["56"], "the head of the phrase is what is kept"
+
+
 def test_reference_numerals_ignore_claim_noise_without_a_magnitude_floor():
     """Claim references ('of claim 1/2/4') are excluded STRUCTURALLY — by scanning the
     specification only — not by a minimum-numeral guess. The fixture's claims recite

@@ -119,6 +119,21 @@ FITTED: list[FittedConstant] = [
         "answerable question. Does not transfer. RT-9 tracks the missing mechanism.",
     ),
     FittedConstant(
+        "patents._ELEMENT_MAX_WORDS", 8, DOMAIN,
+        "Word cap on the element phrase recovered for a pointer construction ('…as "
+        "shown at 20'). The subject is bounded by the nearest sentence break or comma, "
+        "which usually yields 2-5 words; when the pointer sits at the end of a long "
+        "clause it yields the whole clause instead, and the tail is clipped. 8 is above "
+        "every genuine element observed on US5447630A (longest: 'ceramic particulate "
+        "\"scrubber\" or filter', 5 words).",
+        "A specification whose element names genuinely run longer than 8 words — likely "
+        "in chemical or biotech claims, where a single element can be a full reagent "
+        "description. The clip is head-final, so an over-long name loses its qualifiers "
+        "and keeps its head noun; the NUMERAL always survives, so the failure is a "
+        "degraded label, never a dropped reference. Re-measure by listing the word "
+        "counts of pointer-recovered elements on any new corpus.",
+    ),
+    FittedConstant(
         "figures_map.merge_same_spot_numerals(radius=)", 0.02, CORPUS,
         "Normalized distance under which two reads of the same label are ONE mark. The "
         "closest genuine same-token pair on US5447630A sits at 0.0202 — about 0.7 px of "

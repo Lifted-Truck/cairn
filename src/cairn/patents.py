@@ -649,4 +649,79 @@ def reference_numerals(text: str) -> list[Numeral]:
             if sn not in seen:
                 seen[sn] = Numeral(sn, phrase, tail + sib.start(1), tail + sib.end(1))
             tail += sib.end()
+
+    for m in _POINTER.finditer(region):
+        num = m.group(2).lower()
+        if num in seen or _UNIT_AFTER.match(region[m.end():m.end() + 14]):
+            continue
+        phrase = _subject_before(region, m.start())
+        if phrase:
+            seen[num] = Numeral(num, phrase, m.start(2), m.end(2))
+
     return [seen[n] for n in sorted(seen, key=numeral_key)]
+
+
+# "…as shown at 20", "…indicated schematically at 43" — the idiomatic pointer form.
+# The main pattern cannot reach these: it reads the words immediately before the
+# numeral as the element, and here those words are "shown at" / "at", which
+# _NOT_ELEMENT rejects — correctly, since that same rejection is what stops "at
+# temperatures exceeding 500" binding a quantity. So the pointer form needs its own
+# pass, where the lead-in is recognised rather than mistaken for an element phrase.
+_POINTER = re.compile(
+    r"\b(shown|indicated|designated|illustrated|denoted|depicted|referenced)"
+    r"(?:\s+(?:generally|schematically|diagrammatically|broadly|collectively))?"
+    rf"\s+(?:at|by)\s+({_LABEL_RE})(?![\dA-Za-z])(?!\.\d)",
+    re.IGNORECASE,
+)
+# Copular tails that sit between the element and the pointer: "the filter IS PROVIDED
+# as shown at 20". Stripped so the element reads as a part, not as a predicate.
+_COPULA_TAIL = re.compile(
+    r"\s*\b(?:is|are|was|were|be|being|been)?\s*"
+    r"(?:provided|shown|illustrated|indicated|designated|located|positioned|disposed|"
+    r"mounted|arranged|depicted|seen|included)\b\s*$", re.IGNORECASE)
+
+
+def _subject_before(region: str, pointer_start: int) -> str:
+    """The element a pointer construction points AT — the noun phrase to its left.
+
+    Two connectors sit between the element and the lead-in and must be consumed first,
+    or the subject is lost:
+
+      · **"as"** — "…or filter is provided AS shown at 20"; left in place it becomes the
+        phrase's last word, and "as" is a function word the element check rejects;
+      · **the appositive comma** — "The dosing siphon, indicated schematically at 43";
+        cutting at the nearest comma (right) would cut at THIS comma (wrong), leaving
+        nothing, when the subject is the phrase in front of it.
+
+    Past those, the phrase is bounded by the nearest sentence break or comma, where the
+    clause's subject begins. Kept deliberately crude: an over-long element phrase is
+    visible to a reviewer and can be discounted, whereas the numeral it carries is
+    invisible if dropped — the trade this module already makes at large.
+    """
+    head = _CONNECTOR_TAIL.sub("", region[:pointer_start].rstrip())
+    cut = max(head.rfind("."), head.rfind(";"), head.rfind("\n"), head.rfind(","))
+    phrase = head[cut + 1:].strip()
+    phrase = _COPULA_TAIL.sub("", phrase).strip()
+    phrase = re.sub(r"^(the|a|an|said)\s+", "", phrase, flags=re.IGNORECASE).strip()
+    # A bare lead-in with no subject of its own ("As shown at 20, the filter…") carries
+    # no element; emitting an empty or function-word phrase would assert nothing.
+    if not phrase or phrase.split()[-1].lower() in _NOT_ELEMENT:
+        return ""
+    # A clause, not an element: "Liquids exit the separator 10 through primary and
+    # secondary outlets designated at 56" hands back the whole sentence. Truncated
+    # rather than dropped — English noun phrases are head-final, so the tail is the
+    # part that names the thing, and the numeral survives either way (dropping it
+    # would trade a loose phrase for an invisible omission, the wrong way round).
+    words = phrase.split()
+    return " ".join(words[-_ELEMENT_MAX_WORDS:]) if len(words) > _ELEMENT_MAX_WORDS \
+        else phrase
+
+
+# Long enough for real multi-word elements ("ceramic particulate scrubber or filter"
+# is 5), short enough that a runaway clause is visibly clipped.
+_ELEMENT_MAX_WORDS = 8
+
+
+# Consumed before the subject is read — see _subject_before. Repeated because both can
+# occur ("the filter, as shown at 20").
+_CONNECTOR_TAIL = re.compile(r"(?:\s*,|\s+\bas\b|\s+\band\b)+\s*$", re.IGNORECASE)
