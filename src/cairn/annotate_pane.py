@@ -168,7 +168,6 @@ function drawMarks() {
     Object.assign(d.style, {left: (m.left * 100) + '%', top: (m.top * 100) + '%',
       width: (m.width * 100) + '%', height: (m.height * 100) + '%'});
     d.innerHTML = '<span>' + m.numeral + (m.human ? ' \u25c9' : '') + '</span>';
-    d.addEventListener('click', ev => { ev.stopPropagation(); pick(i); });
     marksEl.appendChild(d);
   });
 }
@@ -245,6 +244,15 @@ function at(ev) {
           y: Math.max(0, Math.min(ev.clientY - r.top, r.height))};
 }
 stage.addEventListener('pointerdown', ev => {
+  // A press that lands ON an existing mark SELECTS it; only empty space starts a new
+  // box. Without this branch the mark is unreachable by mouse: preventDefault()
+  // suppresses the click, and setPointerCapture() retargets every later pointer event
+  // to the stage, so the mark's own click handler never fires. It looked wired --
+  // dispatching .click() from the console selected it fine -- because a synthetic
+  // click skips hit-testing and pointer capture, which are the two things breaking it.
+  const mk = ev.target.closest && ev.target.closest('.mk');
+  if (mk) { pick(Number(mk.dataset.i)); return; }
+  deselect();
   ev.preventDefault(); drag = at(ev); stage.setPointerCapture(ev.pointerId);
 });
 stage.addEventListener('pointermove', ev => {
