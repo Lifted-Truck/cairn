@@ -768,6 +768,9 @@ def numeral_coverage(
             misreads.append({
                 "read_as": lo.numeral, "actually": hi.numeral, "page": a.page,
                 "unresolved": True,
+                # The disputed mark's own box, so a surface that says "a reviewer must
+                # read the sheet" can actually show them the sheet (D78).
+                "bbox": list(hi.bbox) if hi.bbox else None,
                 "message": (f'engines disagree on one mark on FIG. {fig}\'s sheet — '
                             f'"{a.numeral}" vs "{b.numeral}" at the same position, and the '
                             f"text ties neither to that figure, so this is NOT resolved; "

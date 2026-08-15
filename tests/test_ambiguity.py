@@ -107,3 +107,59 @@ def test_a_figure_ruling_never_injects_a_numeral_onto_the_sheet(tmp_path):
         value={"reading": "yes"}, by="J. Smith", on="2026-08-15"))
     man = {"pages": [{"page": 7, "numerals": []}]}
     assert apply_adjudications(man, tmp_path)["pages"][0]["numerals"] == []
+
+
+class _Cov:
+    def __init__(self, misreads):
+        self.likely_misreads = misreads
+
+
+def test_an_unresolved_ocr_conflict_names_both_readings(tmp_path):
+    """The record's fields are `read_as` / `actually`. Reading keys that do not exist
+    rendered every one of these as “Is this mark “?” or “the recited form”?” — two
+    fallback defaults where the two candidate readings belonged, which is unreadable
+    and looks like a substitution bug because it is one."""
+    from cairn.ambiguity import OCR_CONFLICT, ocr_conflict
+
+    cov = _Cov([{"read_as": "12", "actually": "72", "page": 6, "unresolved": True,
+                 "bbox": [0.4, 0.3, 0.02, 0.015],
+                 "message": "engines disagree on one mark"}])
+    a = ocr_conflict(cov)[0]
+    assert a.kind == OCR_CONFLICT
+    assert a.label == "12 / 72"
+    assert "“12” or “72”" in a.question
+    assert {o.value for o in a.options} == {"12", "72", "neither"}
+    assert a.where["bbox"] == [0.4, 0.3, 0.02, 0.015]     # so the sheet can be shown
+
+
+def test_an_unresolved_conflict_carries_no_recommendation():
+    """The one kind that must not propose. "Unresolved" means the specification ties
+    NEITHER reading to that figure — so the signals a recommendation would come from
+    are exactly the ones missing, and offering a favourite would manufacture confidence
+    in the single case defined by its absence."""
+    from cairn.ambiguity import ocr_conflict
+
+    cov = _Cov([{"read_as": "34", "actually": "54", "page": 6, "unresolved": True,
+                 "message": "engines disagree"}])
+    assert ocr_conflict(cov)[0].proposed == ""
+
+
+def test_a_resolved_misread_is_not_a_question():
+    """Only `unresolved` entries are forks. A misread the text already settled has an
+    answer, and putting it in a queue of open questions wastes the reviewer's attention
+    on work already done."""
+    from cairn.ambiguity import ocr_conflict
+    assert ocr_conflict(_Cov([{"read_as": "140", "actually": "14a", "page": 3}])) == []
+
+
+def test_the_pane_says_out_loud_when_there_is_no_recommendation():
+    """An absent recommendation and a recommendation nobody rendered look identical on
+    the page, and only one of them means "there is genuinely nothing to go on"."""
+    from cairn.adjudicate_pane import _ambiguities
+    from cairn.ambiguity import ocr_conflict
+
+    cov = _Cov([{"read_as": "36", "actually": "56", "page": 6, "unresolved": True,
+                 "message": "engines disagree"}])
+    html = _ambiguities(ocr_conflict(cov))
+    assert "no recommendation here" in html
+    assert "inventing confidence" in html

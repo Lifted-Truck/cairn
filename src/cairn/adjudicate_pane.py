@@ -109,7 +109,7 @@ def _locate_surface(item, sheet_files: dict[int, str]) -> str:
         "</div>")
 
 
-def _ambiguities(ambs) -> str:
+def _ambiguities(ambs, sheet_files: dict[int, str] | None = None) -> str:
     """The interpretation queue (D77) — a fork, its evidence, and a recommendation.
 
     Kept above the location queue and visually apart from it, because the two ask
@@ -127,7 +127,18 @@ def _ambiguities(ambs) -> str:
     rows = []
     for a in ambs:
         ev = ""
-        if a.where.get("recited_as"):
+        if a.where.get("bbox") and a.where.get("page") in (sheet_files or {}):
+            x, y, w, h = a.where["bbox"]
+            d = box_to_display(x, y, w, h)
+            cx, cy = d["left"] + d["width"] / 2, d["top"] + d["height"] / 2
+            ev = (f"<div class='crop' data-file='{_e(sheet_files[a.where['page']])}' "
+                  f"data-x='{cx:.6f}' data-y='{cy:.6f}' "
+                  f"data-w='{d['width']:.6f}' data-h='{d['height']:.6f}'>"
+                  f"<img alt='the disputed mark on sheet {_e(a.where['page'])}'>"
+                  f"<span class='ring'></span></div>"
+                  f"<p class='cropcap'>The mark in dispute, on sheet "
+                  f"{_e(a.where['page'])}. Zoom in and read it.</p>")
+        elif a.where.get("recited_as"):
             ev = (f"<p class='ev'><b>as a part:</b> {_e(a.where['recited_as'])}</p>"
                   f"<p class='ev'><b>as a quantity:</b> {_e(a.where['quantity_as'])}</p>")
         opts = "".join(
@@ -135,9 +146,18 @@ def _ambiguities(ambs) -> str:
                 v=_e(o.value), r=_e(o.rationale),
                 c=" class='rec'" if o.value == a.proposed else "")
             for o in a.options)
-        rec = (f"<p class='rec-note'>Cairn suggests <b>{_e(a.proposed)}</b> — a "
-               f"recommendation from the deterministic signals, not a finding. "
-               f"Nothing is applied until you choose.</p>" if a.proposed else "")
+        if a.proposed:
+            rec = (f"<p class='rec-note'>Cairn suggests <b>{_e(a.proposed)}</b> — a "
+                   f"recommendation from the deterministic signals, not a finding. "
+                   f"Nothing is applied until you choose.</p>")
+        else:
+            # Said out loud rather than left blank. An absent recommendation and a
+            # recommendation nobody rendered look identical on the page, and only one
+            # of them means "there is genuinely nothing to go on here".
+            rec = ("<p class='rec-note none'><b>Cairn has no recommendation here.</b> "
+                   "The signals that would favour one reading are exactly the ones "
+                   "missing — that is what makes this unresolved. Suggesting a "
+                   "favourite would be inventing confidence.</p>")
         rows.append(
             f"<li class='amb' data-id='{_e(a.amb_id)}' "
             f"data-proposed='{_e(a.proposed)}' data-target='{_e(json.dumps(a.where))}'>"
@@ -192,7 +212,7 @@ def render(items, *, reviewer: str | None, on: str | None,
              "anything absent from both is invisible to all of them.</li>")
     return _PAGE.replace("{{ROWS}}", "".join(rows) or empty) \
                 .replace("{{WHO}}", who) \
-                .replace("{{AMBS}}", _ambiguities(list(ambiguities))) \
+                .replace("{{AMBS}}", _ambiguities(list(ambiguities), sheet_files)) \
                 .replace("{{N}}", str(len(items)))
 
 
@@ -241,6 +261,7 @@ h2{font:600 15px/1.3 var(--sans);margin:26px 0 4px}
 .ev{margin:3px 0;font:12px var(--mono);color:var(--mut);padding-left:10px;
  border-left:2px solid var(--rule)}
 .rec-note{margin:9px 0 7px;font-size:12.5px;color:var(--mut)}
+.rec-note.none{color:var(--warn)}
 .opts{display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap}
 .opts button{display:block;text-align:left;max-width:230px;padding:7px 11px}
 .opts button.rec{border-color:var(--accent)}

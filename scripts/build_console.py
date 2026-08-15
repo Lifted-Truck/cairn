@@ -197,7 +197,6 @@ def main() -> int:
         calibration=calibration, calibrated=is_calibrated,
         stale=bool(rec and not rec.separable),
         fitted_untested=untested, sheets=n_sheets, adjudications=adjudications,
-        ambiguities=len(ambiguities),
         chain_ok=True), encoding="utf-8")
 
     panes = [
@@ -229,6 +228,7 @@ def main() -> int:
         engagement=ns.engagement or store_dir.parent.name,
         doc_ids=ids, calibration=calibration, calibrated=is_calibrated,
         contract=CONTRACT_VERSION, adjudications=adjudications,
+        ambiguities=len(ambiguities),
         generated_on=ns.on, panes=panes)
 
     # The Locate pane is static HTML that CALLS the real tools; it needs

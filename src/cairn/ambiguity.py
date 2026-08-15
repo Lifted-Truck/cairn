@@ -131,23 +131,41 @@ def numeral_sense(text: str, mentions) -> list[Ambiguity]:
 
 
 def ocr_conflict(coverage) -> list[Ambiguity]:
-    """Two engines read one mark differently and nothing reconciled them."""
+    """Two engines read one mark differently and the text favours neither.
+
+    **This is the one kind that carries no recommendation, and that is the point.**
+    "Unresolved" here means precisely that the specification ties neither reading to
+    that figure — so there is no deterministic signal to recommend from, and offering
+    one would manufacture confidence in the single case defined by its absence. The
+    panel's whole claim is that it shows forks honestly; a fork with a fabricated
+    favourite would be the first thing to break that.
+
+    The record's fields are `read_as` / `actually`, ordered by OCR confidence for an
+    unresolved pair — NOT by which the text recites, because for these neither is.
+    """
     out = []
     for m in getattr(coverage, "likely_misreads", []) or []:
         if not m.get("unresolved"):
             continue
-        label = str(m.get("numeral", "?"))
-        alt = str(m.get("recited") or m.get("alternative") or "the recited form")
+        lower, higher = str(m.get("read_as", "")), str(m.get("actually", ""))
+        if not lower or not higher:
+            continue
+        page = m.get("page")
+        pair = sorted((lower, higher), key=lambda s: (len(s), s))
         out.append(Ambiguity(
-            amb_id=f"{OCR_CONFLICT}:{label}",
+            amb_id=f"{OCR_CONFLICT}:p{page}:{pair[0]}-{pair[1]}",
             kind=OCR_CONFLICT,
-            label=label,
-            question=f"Is this mark “{label}” or “{alt}”?",
+            label=f"{pair[0]} / {pair[1]}",
+            question=f"Is this mark “{pair[0]}” or “{pair[1]}”?",
             detail=m.get("message", "Two readings of one mark; nothing reconciled them."),
-            options=(Option(label, "the reading OCR returned for this mark"),
-                     Option(alt, "the form the specification recites")),
-            proposed=alt,
-            where={"numeral": label, "page": m.get("page")},
+            options=(
+                Option(higher, "the reading with the higher OCR confidence"),
+                Option(lower, "the reading with the lower OCR confidence"),
+                Option("neither", "both engines misread it; the mark is something else"),
+            ),
+            proposed="",          # deliberately none — see the docstring
+            where={"page": page, "readings": [lower, higher],
+                   "bbox": m.get("bbox")},
         ))
     return out
 
