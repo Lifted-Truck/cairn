@@ -59,3 +59,7 @@ corpus/engagements/
 # control, not ours to publish. Removing it going forward does not undo prior exposure:
 # it was public from 2026-07-28 (D38) until now, and git history retains the blob.
 /private/
+
+# Dev-server launch config: points at a gitignored engagement store and names a
+# reviewer, so it is machine-local by construction -- it would not resolve in a clone.
+.claude/launch.json
