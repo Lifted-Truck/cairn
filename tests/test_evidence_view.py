@@ -341,7 +341,7 @@ def test_figures_render_and_wire_to_the_interaction(store):
     assert 'data-fig="FIG. 4"' in html and 'data-fig="FIG. 5"' in html
     assert _STUB_PNG in html                             # embedded, self-contained
     # only the interaction's own figure is wired (FIG. 4, not FIG. 5)
-    assert re.search(r'const FIGMAP = \{[^}]*"i0":\s*\["FIG\. 4"\]', html)
+    assert re.search(r'"i0":\s*\{"figs":\s*\["FIG\. 4"\]', html)
     assert '.figpanel.on { display:block; }' in html    # revealed only when active
 
 
@@ -359,7 +359,7 @@ def test_interaction_figure_not_in_catalog_is_dropped(store):
     inter.figures = ["FIG. 4", "FIG. 99"]               # 99 has no panel
     html = render_evidence_view([inter], store,
                                 figures=[FigurePanel("FIG. 4", "cap", _STUB_PNG)])
-    assert re.search(r'"i0":\s*\["FIG\. 4"\]', html)    # 99 dropped
+    assert re.search(r'"i0":\s*\{"figs":\s*\["FIG\. 4"\]', html)   # 99 dropped
     assert "FIG. 99" not in html
 
 
@@ -431,3 +431,38 @@ def test_a_refusal_keeps_its_located_evidence(store):
     assert '<span class="badge answer">' not in html          # no conclusion presented
     assert "What Cairn located" in html                        # …but the evidence is there
     assert 'class="m k-fig"' in html, "a refusal still lights its cited spans"
+
+
+def test_only_the_cited_numerals_light_on_an_opened_figure(store):
+    """D74: a sheet carries every mark OCR found — sheet 2 of the engagement patent has
+    32. Lighting all of them the moment a figure opens answers a question nobody asked
+    and buries the one the reader is checking, so every mark is PLACED and only the
+    cited ones are revealed."""
+    from cairn.evidence_view import FigurePanel
+    marks = ({"numeral": "12", "left": .1, "top": .2, "width": .03, "height": .02},
+             {"numeral": "90", "left": .5, "top": .6, "width": .03, "height": .02})
+    inter = _clean(store)
+    inter.figures = ["FIG. 4"]
+    inter.figure_numerals = ["12"]                       # 90 is on the sheet, not cited
+    html = render_evidence_view(
+        [inter], store, figures=[FigurePanel("FIG. 4", "cap", _STUB_PNG, marks)])
+
+    assert 'data-num="12"' in html and 'data-num="90"' in html   # both placed…
+    assert re.search(r'"i0":\s*\{"figs":\s*\["FIG\. 4"\],\s*"nums":\s*\["12"\]', html)
+    assert ".fmk { position:absolute; display:none" in html      # …hidden until lit
+    assert ".fmk.on { display:block; }" in html
+
+
+def test_the_figure_strip_can_always_be_dismissed(store):
+    """A figure strip that will not close turns the document pane into a drawing pane.
+    Three ways out: the button, Escape, or clicking the active card again."""
+    from cairn.evidence_view import FigurePanel
+    inter = _clean(store)
+    inter.figures = ["FIG. 4"]
+    html = render_evidence_view([inter], store,
+                                figures=[FigurePanel("FIG. 4", "cap", _STUB_PNG)])
+    assert 'class="figclose"' in html
+    assert "e.target.closest('.figclose')" in html
+    assert "e.key==='Escape'" in html
+    # …and clearing puts the numeral overlays away with the panels.
+    assert "document.querySelectorAll('.fmk.on')" in html

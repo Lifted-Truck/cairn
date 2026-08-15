@@ -39,6 +39,12 @@ class FigurePanel:
     label: str                # "FIG. 4" — the key an Interaction.figures entry names
     caption: str
     image: str                # a self-contained data: URI (server-less, like the view)
+    # Reference numerals OCR located on this sheet, in TOP-LEFT display fractions
+    # (annotate.box_to_display, the tested conversion). Only the ones an interaction
+    # actually cites are lit, so a sheet carrying 32 marks does not become 32
+    # highlights the moment a figure opens. Display-only (D21): a numeral box is shown
+    # evidence, never a text citation, and is never `verify`-checked.
+    marks: tuple = ()
 
 
 @dataclass
@@ -53,6 +59,7 @@ class Interaction:
     trace: str = ""
     frame: QuestionFrame | None = None
     figures: list[str] = field(default_factory=list)  # FigurePanel labels to surface (RT-4)
+    figure_numerals: list[str] = field(default_factory=list)  # numerals to light on them
 
 
 # Outcome classes that PRESENT a conclusion (D16) — they get the answer-style card.
@@ -254,7 +261,22 @@ header a { color:var(--chipb); }
   border-bottom:1px solid var(--line); background:var(--bg); }
 .figpanel { display:none; margin:0; max-width:230px; }
 .figpanel.on { display:block; }
-.figpanel img { width:100%; border:1px solid var(--line); border-radius:6px; background:#fff; }
+.figpanel img { width:100%; border:1px solid var(--line); border-radius:6px; background:#fff;
+  display:block; }
+.figwrap { position:relative; }
+/* Every located numeral is placed, but only the cited ones are visible — an opened
+   sheet carrying 32 marks must not become 32 highlights. */
+.fmk { position:absolute; display:none; border:1.5px solid var(--markb);
+  background:rgba(240,136,62,.18); border-radius:2px; pointer-events:none; }
+.fmk.on { display:block; }
+.fmk i { position:absolute; top:-13px; left:-1px; font:700 9px/1.3 var(--mono);
+  font-style:normal; color:var(--markb); background:var(--bg); padding:0 2px;
+  border-radius:2px; }
+.figclose { position:absolute; right:0; top:0; z-index:6; font:600 10.5px var(--sans);
+  color:var(--muted); background:var(--bg); border:1px solid var(--line);
+  border-radius:5px; padding:2px 8px; cursor:pointer; display:none; }
+.figstrip:has(.figpanel.on) .figclose { display:block; }
+.figclose:hover { color:var(--fg); border-color:var(--markb); }
 .figpanel figcaption { font-size:10.5px; color:var(--muted); margin-top:3px; line-height:1.35; }
 .docln { white-space:pre-wrap; word-break:break-word; color:#aab2c0; padding:0 6px;
   border-left:2px solid transparent; border-right:2px solid transparent; }
@@ -333,6 +355,7 @@ function clearAll(){
   document.querySelectorAll('mark.m.on').forEach(m=>m.classList.remove('on'));
   document.querySelectorAll('mark.flash').forEach(m=>m.classList.remove('flash'));
   document.querySelectorAll('.figpanel.on').forEach(f=>f.classList.remove('on'));
+  document.querySelectorAll('.fmk.on').forEach(m=>m.classList.remove('on'));
   document.querySelectorAll('.docln.bx,.docln.bx-top,.docln.bx-bot')
     .forEach(e=>e.classList.remove('bx','bx-top','bx-bot'));
 }
@@ -341,9 +364,18 @@ function light(id){
   document.querySelectorAll('mark.m').forEach(m=>{
     if((m.dataset.int||'').split(' ').includes(id)) m.classList.add('on');
   });
-  (FIGMAP[id]||[]).forEach(lab=>{
+  const fm = FIGMAP[id] || {figs:[], nums:[]};
+  const nums = new Set(fm.nums || []);
+  (fm.figs||[]).forEach(lab=>{
     document.querySelectorAll('.figpanel').forEach(f=>{
-      if(f.dataset.fig===lab) f.classList.add('on');
+      if(f.dataset.fig!==lab) return;
+      f.classList.add('on');
+      // Light only the numerals THIS interaction cites. A sheet carries every mark
+      // OCR found; showing them all would answer a question nobody asked and bury
+      // the one the reader is checking.
+      f.querySelectorAll('.fmk').forEach(mk=>{
+        if(nums.has(mk.dataset.num)) mk.classList.add('on');
+      });
     });
   });
   (CLUSTERS[id]||[]).forEach(lines=>lines.forEach((lid,i)=>{
@@ -366,6 +398,12 @@ document.querySelectorAll('.card').forEach(card=>card.addEventListener('click', 
   clearAll(); light(card.id);
   const c=CLUSTERS[card.id]; if(c&&c.length&&c[0].length) flashTo(c[0][0]);
 }));
+// Three ways out, because a figure strip that will not close turns the document pane
+// into a drawing pane: the close button, Escape, or clicking the active card again.
+document.addEventListener('click', e=>{
+  if(e.target.closest('.figclose')) clearAll();
+});
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') clearAll(); });
 """
 
 _PRIORITY = {"figure": 3, "label": 2, "closest": 1}
@@ -712,6 +750,19 @@ def _unverified_card(inter: Interaction, store: SpanStore) -> str:
     return "".join(parts)
 
 
+def _fig_mark(m: dict) -> str:
+    """One located numeral, positioned over its drawing.
+
+    Coordinates arrive already converted to top-left fractions by the caller, through
+    `annotate.box_to_display` — the page never works out where a box goes, for the same
+    reason the adjudicate crop does not: the y-flip is where this keeps going wrong.
+    """
+    return (f'<span class="fmk" data-num="{_esc(str(m["numeral"]))}" '
+            f'style="left:{m["left"] * 100:.3f}%;top:{m["top"] * 100:.3f}%;'
+            f'width:{m["width"] * 100:.3f}%;height:{m["height"] * 100:.3f}%">'
+            f'<i>{_esc(str(m["numeral"]))}</i></span>')
+
+
 def _caption_tail(panel) -> str:
     """The caption with its own label stripped off the front.
 
@@ -780,14 +831,19 @@ def render_evidence_view(
     if figures:
         panels = "".join(
             f'<figure class="figpanel" data-fig="{_esc(f.label)}">'
-            f'<img src="{f.image}" alt="{_esc(f.label)}">'
+            f'<div class="figwrap"><img src="{f.image}" alt="{_esc(f.label)}">'
+            + "".join(_fig_mark(m) for m in f.marks) + "</div>"
             f'<figcaption><b>{_esc(f.label)}</b>{_esc(_caption_tail(f))}'
             f'</figcaption></figure>'
             for f in figures
         )
-        figstrip = f'<div class="figstrip">{panels}</div>'
+        close = ('<button class="figclose" type="button" '
+                 'title="close the figures (Esc)">close &times;</button>')
+        figstrip = f'<div class="figstrip">{close}{panels}</div>'
         known = {f.label for f in figures}
-        figmap = {f"i{idx}": [lab for lab in inter.figures if lab in known]
+        # Per interaction: which panels open, and which numerals light inside them.
+        figmap = {f"i{idx}": {"figs": [lab for lab in inter.figures if lab in known],
+                              "nums": [str(n) for n in inter.figure_numerals]}
                   for idx, inter in enumerate(interactions) if inter.figures}
 
     doc_ids = list(painted) or list(store._docs)[:1]

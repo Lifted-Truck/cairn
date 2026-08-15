@@ -21,6 +21,7 @@ to reviewing the citations.
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
 import _bootstrap  # noqa: F401  (puts src/ on sys.path)
@@ -53,6 +54,7 @@ def _patent_figure_context(store: SpanStore, store_dir: Path):
     import base64
     import json
 
+    from cairn.annotate import box_to_display
     from cairn.evidence_view import FigurePanel
     from cairn.figures_map import fig_to_sheets, load_manifest, numeral_sightings
     from cairn.patents import figure_references, parse_figures, reference_numerals
@@ -82,8 +84,14 @@ def _patent_figure_context(store: SpanStore, store_dir: Path):
         how = (f"located by OCR, conf {a.confidence}" if a.method == "ocr"
                else "assigned by elimination")
         uri = "data:image/png;base64," + base64.b64encode(img.read_bytes()).decode()
+        # Every numeral OCR located on this sheet, converted ONCE here through the
+        # tested box_to_display; the page only places what it is given (D66's lesson).
+        marks = tuple(
+            {"numeral": str(s.numeral), **box_to_display(*s.bbox)}
+            for s in numeral_sightings(ocr) if s.page == a.page and s.bbox)
         panels.append(FigurePanel(f"FIG. {a.fig}",
-                                  f"{caption.get(a.fig, '')} — sheet p.{a.page} ({how})", uri))
+                                  f"{caption.get(a.fig, '')} — sheet p.{a.page} ({how})",
+                                  uri, marks))
     return {"panels": panels, "assigns": assigns,
             "sightings": numeral_sightings(ocr),
             "known_numerals": [n.number for n in reference_numerals(text)]}
@@ -104,6 +112,14 @@ def _attach_figures(interactions, store: SpanStore, ctx) -> None:
                     spans.append(sp.text)
         inter.figures = [f"FIG. {n}" for n in relevant_figures(
             spans, ctx["assigns"], ctx["sightings"], ctx["known_numerals"])]
+        # Which numerals to light on those sheets: the ones this interaction's own
+        # cited text names. Anything else on the sheet stays placed but dark — the
+        # reader is checking THIS citation, not taking inventory of the drawing.
+        blob = " ".join(spans)
+        inter.figure_numerals = sorted(
+            {n for n in ctx["known_numerals"]
+             if re.search(rf"(?<![\w.]){re.escape(str(n))}(?![\w])", blob)},
+            key=lambda s: (len(str(s)), str(s)))
 
 
 def build_from_audit(audit_path: Path, out: Path, last: int = 0,
