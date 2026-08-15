@@ -21,7 +21,6 @@ to reviewing the citations.
 from __future__ import annotations
 
 import argparse
-import re
 from pathlib import Path
 
 import _bootstrap  # noqa: F401  (puts src/ on sys.path)
@@ -57,7 +56,12 @@ def _patent_figure_context(store: SpanStore, store_dir: Path):
     from cairn.annotate import box_to_display
     from cairn.evidence_view import FigurePanel
     from cairn.figures_map import fig_to_sheets, load_manifest, numeral_sightings
-    from cairn.patents import figure_references, parse_figures, reference_numerals
+    from cairn.patents import (
+        figure_references,
+        numeral_mentions,
+        parse_figures,
+        reference_numerals,
+    )
 
     fig_dir = store_dir.parent / "figures"
     if not ((fig_dir / "ocr_manifest.json").exists()
@@ -94,7 +98,8 @@ def _patent_figure_context(store: SpanStore, store_dir: Path):
                                   uri, marks))
     return {"panels": panels, "assigns": assigns,
             "sightings": numeral_sightings(ocr),
-            "known_numerals": [n.number for n in reference_numerals(text)]}
+            "known_numerals": [n.number for n in reference_numerals(text)],
+            "mentions": numeral_mentions(text)}
 
 
 def _attach_figures(interactions, store: SpanStore, ctx) -> None:
@@ -105,20 +110,23 @@ def _attach_figures(interactions, store: SpanStore, ctx) -> None:
         if inter.answer is None:
             continue
         spans = []
+        ranges = []
         for s in inter.answer.sentences:
             for atom in list(s.atoms) + [o for d in s.derived for o in d.operands]:
                 sp = store.span_containing(atom.doc_id, atom.char_start)
                 if sp is not None:
                     spans.append(sp.text)
+                    ranges.append((sp.char_start, sp.char_end))
         inter.figures = [f"FIG. {n}" for n in relevant_figures(
             spans, ctx["assigns"], ctx["sightings"], ctx["known_numerals"])]
-        # Which numerals to light on those sheets: the ones this interaction's own
-        # cited text names. Anything else on the sheet stays placed but dark — the
-        # reader is checking THIS citation, not taking inventory of the drawing.
-        blob = " ".join(spans)
+        # Which numerals to light: those RECITED as reference numerals inside a cited
+        # range, not those whose digits merely appear there. Matching digits lit
+        # numeral 18 for an answer quoting "a maximum diameter of 18 inches" (a
+        # measurement) and numeral 5 for "FIG. 5" (a figure). The mention index carries
+        # the same guards `reference_numerals` uses, applied per occurrence.
         inter.figure_numerals = sorted(
-            {n for n in ctx["known_numerals"]
-             if re.search(rf"(?<![\w.]){re.escape(str(n))}(?![\w])", blob)},
+            {m.number for m in ctx["mentions"]
+             if any(s <= m.char_start < e for s, e in ranges)},
             key=lambda s: (len(str(s)), str(s)))
 
 

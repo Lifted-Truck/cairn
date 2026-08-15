@@ -631,9 +631,27 @@ def reference_numerals(text: str) -> list[Numeral]:
     invisible. Locate-only (D10): never claims which figure depicts a numeral — that
     needs the image. Element-phrase precision remains refinable.
     """
+    seen: dict[str, Numeral] = {}
+    for n in numeral_mentions(text):                    # first mention per numeral wins
+        seen.setdefault(n.number, n)
+    return [seen[k] for k in sorted(seen, key=numeral_key)]
+
+
+def numeral_mentions(text: str) -> list[Numeral]:
+    """**Every** recitation of a reference numeral, in document order — not just the
+    first of each (`reference_numerals`).
+
+    Needed wherever the question is "is this numeral being RECITED right here?", which
+    a bare digit match cannot answer. The evidence view lit a numeral whenever its
+    digits appeared anywhere in a cited span, so an answer quoting "a maximum diameter
+    of 18 inches" lit reference numeral 18 — a different part of the machine — and
+    "FIG. 5" lit numeral 5. Same guards as `reference_numerals`, applied per mention:
+    a unit after the number makes it a quantity, and a function word before it makes it
+    a preposition, not an element.
+    """
     cm = _CLAIMS_MARKER.search(text)
     region = text[:cm.start()] if cm else text          # specification only
-    seen: dict[str, Numeral] = {}
+    out: list[Numeral] = []
     for m in _NUMERAL.finditer(region):
         phrase = re.sub(r"^(the|a|an|said)\s+", "", m.group(1).strip())
         if not phrase or phrase.split()[-1] in _NOT_ELEMENT:
@@ -642,8 +660,7 @@ def reference_numerals(text: str) -> list[Numeral]:
             continue
         num = m.group(2).lower()                       # "12a" stays distinct from "12"
         s = m.start() + (m.group(0).find(phrase))
-        if num not in seen:                            # first mention only
-            seen[num] = Numeral(num, phrase, s, m.end())
+        out.append(Numeral(num, phrase, s, m.end()))
         # list siblings: "pipes 56, 58" recites 58 with no noun phrase of its own —
         # it inherits the list head's element. ("58" only ever appears in lists on
         # US5447630A and was invisible without this.)
@@ -658,19 +675,18 @@ def reference_numerals(text: str) -> list[Numeral]:
             if not sib:
                 break
             sn = sib.group(1).lower()
-            if sn not in seen:
-                seen[sn] = Numeral(sn, phrase, tail + sib.start(1), tail + sib.end(1))
+            out.append(Numeral(sn, phrase, tail + sib.start(1), tail + sib.end(1)))
             tail += sib.end()
 
     for m in _POINTER.finditer(region):
-        num = m.group(2).lower()
-        if num in seen or _UNIT_AFTER.match(region[m.end():m.end() + 14]):
+        if _UNIT_AFTER.match(region[m.end():m.end() + 14]):
             continue
         phrase = _subject_before(region, m.start())
         if phrase:
-            seen[num] = Numeral(num, phrase, m.start(2), m.end(2))
+            out.append(Numeral(m.group(2).lower(), phrase, m.start(2), m.end(2)))
 
-    return [seen[n] for n in sorted(seen, key=numeral_key)]
+    # Document order, so "the first mention" means the same thing to every caller.
+    return sorted(out, key=lambda n: n.char_start)
 
 
 # "…as shown at 20", "…indicated schematically at 43" — the idiomatic pointer form.

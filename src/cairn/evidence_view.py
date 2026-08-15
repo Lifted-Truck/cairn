@@ -266,8 +266,12 @@ header a { color:var(--chipb); }
 .figwrap { position:relative; }
 /* Every located numeral is placed, but only the cited ones are visible — an opened
    sheet carrying 32 marks must not become 32 highlights. */
-.fmk { position:absolute; display:none; border:1.5px solid var(--markb);
-  background:rgba(240,136,62,.18); border-radius:2px; pointer-events:none; }
+/* DASHED on purpose: a solid box in this view means a verified text citation. A
+   numeral on a drawing is neither verified nor cited — it is a placement OCR proposed,
+   surfaced because the cited passage recites that numeral. Reading like a citation
+   would be the overclaim (D21, D76). */
+.fmk { position:absolute; display:none; border:1.5px dashed var(--markb);
+  background:rgba(240,136,62,.13); border-radius:2px; pointer-events:none; }
 .fmk.on { display:block; }
 .fmk i { position:absolute; top:-13px; left:-1px; font:700 9px/1.3 var(--mono);
   font-style:normal; color:var(--markb); background:var(--bg); padding:0 2px;
@@ -277,6 +281,10 @@ header a { color:var(--chipb); }
   border-radius:5px; padding:2px 8px; cursor:pointer; display:none; }
 .figstrip:has(.figpanel.on) .figclose { display:block; }
 .figclose:hover { color:var(--fg); border-color:var(--markb); }
+.figfoot { display:none; flex-basis:100%; margin:2px 0 0; font-size:10.5px;
+  color:var(--muted); line-height:1.4; max-width:70ch; }
+.figfoot code { font-size:10px; }
+.figstrip:has(.figpanel.on) .figfoot { display:block; }
 .figpanel figcaption { font-size:10.5px; color:var(--muted); margin-top:3px; line-height:1.35; }
 .docln { white-space:pre-wrap; word-break:break-word; color:#aab2c0; padding:0 6px;
   border-left:2px solid transparent; border-right:2px solid transparent; }
@@ -839,7 +847,14 @@ def render_evidence_view(
         )
         close = ('<button class="figclose" type="button" '
                  'title="close the figures (Esc)">close &times;</button>')
-        figstrip = f'<div class="figstrip">{close}{panels}</div>'
+        # Said once on the strip rather than per panel: the reader needs to know the
+        # ringed numerals are INFERRED before reading any of them, and a caveat
+        # repeated eight times stops being read at all.
+        note = ('<p class="figfoot">Ringed numerals are <b>inferred</b>, not verified. '
+                'OCR proposed each placement, and it is shown here because the cited '
+                'passage recites that numeral — neither the reading nor the position is '
+                'part of the citation <code>verify</code> checked. Judge them by eye.</p>')
+        figstrip = f'<div class="figstrip">{close}{panels}{note}</div>'
         known = {f.label for f in figures}
         # Per interaction: which panels open, and which numerals light inside them.
         figmap = {f"i{idx}": {"figs": [lab for lab in inter.figures if lab in known],

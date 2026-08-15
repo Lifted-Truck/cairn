@@ -466,3 +466,25 @@ def test_the_figure_strip_can_always_be_dismissed(store):
     assert "e.key==='Escape'" in html
     # …and clearing puts the numeral overlays away with the panels.
     assert "document.querySelectorAll('.fmk.on')" in html
+
+
+def test_the_numeral_overlay_is_marked_inferred_not_verified(store):
+    """D76: a numeral ringed on a drawing is not a citation and must not read like one.
+
+    Its reading came from OCR and its placement from a bounding box; neither passed
+    through `verify`. In this view a SOLID box means a verified text citation, so the
+    overlay is dashed and the strip says plainly that the association is inferred —
+    the same overclaim the withheld-answer work removed, one surface over.
+    """
+    from cairn.evidence_view import FigurePanel
+    inter = _clean(store)
+    inter.figures = ["FIG. 4"]
+    inter.figure_numerals = ["12"]
+    html = render_evidence_view(
+        [inter], store,
+        figures=[FigurePanel("FIG. 4", "cap", _STUB_PNG,
+                             ({"numeral": "12", "left": .1, "top": .2,
+                               "width": .03, "height": .02},))])
+    assert "dashed var(--markb)" in html, "an inferred box must not look like a citation"
+    assert "inferred</b>, not verified" in html
+    assert "figfoot" in html
