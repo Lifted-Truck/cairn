@@ -64,30 +64,52 @@ def interactions_from_audit(entries: list[dict], store: SpanStore) -> list[Inter
     """Reconstruct presented interactions from audit-log payloads (I5) → evidence view.
 
     The bridge from a live Claude Code / Desktop session to the review GUI: each
-    `verify(ok)` record becomes a card, its question taken from the preceding
-    `check_support` / `check_claim`. `verify` is re-run (deterministic) so the view
+    `verify(ok)` record becomes a card. `verify` is re-run (deterministic) so the view
     reflects the current corpus. Abstentions (no `verify ok`) are not rendered.
+
+    The question comes from the record's **own** `frame.question` (D13), never from a
+    neighbouring record. Carrying the last `check_support` query forward was wrong on
+    all 23 records of the first engagement: 18 showed the retrieval *query* in place of
+    the question, and 3 attached an answer to an unrelated earlier question, because a
+    `question` variable that survives the loop iteration outlives the record it came
+    from. A search query is not a question, and proximity in a log is not attribution.
     """
     out: list[Interaction] = []
-    question = None
     sup_prov: dict = {}
+    last_query = None
     for e in entries:
         kind = e.get("kind")
         if kind in ("check_support", "check_claim"):
-            question = e.get("query") or e.get("claim") or question
+            last_query = e.get("query") or e.get("claim") or last_query
             sup_prov = e.get("provenance", {}) or sup_prov
         elif kind == "verify" and e.get("ok") and e.get("answer"):
             answer = answer_from_json(e["answer"])
             outcome = e.get("outcome") if e.get("outcome") in _PRESENTS else "answer"
             frame = frame_from_json(e["frame"]) if e.get("frame") else None
             out.append(Interaction(
-                question=question or "(question not in log)",
+                question=_question_for(e, last_query),
                 kind=outcome, answer=answer, verify=run_verify(answer, store),
                 note="Reconstructed from the audit log (I5) — a real logged session.",
                 trace=_provenance_line(e.get("provenance", {}), sup_prov),
                 frame=frame,
             ))
     return out
+
+
+def _question_for(record: dict, last_query: str | None) -> str:
+    """The question a verify record answered, from the record itself where possible.
+
+    A pre-D13 record carries no frame, so the nearest retrieval query is the only
+    thing left — it is shown, but LABELLED as a query, because presenting a BM25
+    query string as if it were the reviewer's question misrepresents the record on a
+    surface a client signs.
+    """
+    own = (record.get("frame") or {}).get("question")
+    if own:
+        return own
+    if last_query:
+        return f"(question not logged; nearest retrieval query: {last_query!r})"
+    return "(question not in log)"
 
 
 def sessions_from_audit(entries: list[dict], store: SpanStore) -> list[dict]:

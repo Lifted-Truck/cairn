@@ -131,17 +131,69 @@ def test_interactions_from_audit_rebuilds_presented(store):
         "atoms": [{"text": atom.text, "doc_id": atom.doc_id,
                    "char_start": atom.char_start, "char_end": atom.char_end}],
     }]}
+    frame = {"question": "What were Apple's total assets?",
+             "constraints": [{"role": "metric", "text": "total assets"}]}
     entries = [
-        {"kind": "check_support", "query": "What were Apple's total assets?",
+        {"kind": "check_support", "query": "apple total assets fiscal 2024",
          "status": "supported"},
-        {"kind": "verify", "ok": True, "answer": answer_json},
+        {"kind": "verify", "ok": True, "answer": answer_json, "frame": frame},
         {"kind": "check_support", "query": "CEO pay?",
          "status": "insufficient"},  # abstain → dropped from the view
     ]
     inters = interactions_from_audit(entries, store)
     assert len(inters) == 1                                   # only the presented one
-    assert inters[0].question == "What were Apple's total assets?"  # paired from check_support
+    assert inters[0].question == "What were Apple's total assets?"  # the record's OWN frame
     assert inters[0].verify is not None and inters[0].verify.ok    # verify re-run, resolves
+
+
+def test_the_question_comes_from_the_record_never_from_a_neighbour(store):
+    """The attribution defect, made a standing test.
+
+    Carrying the last `check_support` query forward mislabelled all 23 records of the
+    first engagement — 18 showed a BM25 query where the question belonged, and 3 put an
+    answer under an unrelated earlier question. Both are wrong on a surface a client
+    signs, and the second is the dangerous one: nothing on the card reveals that the
+    question above it belongs to a different interaction.
+    """
+    from cairn.evidence_view import interactions_from_audit
+
+    atom = _bind(store, "364,980", TOTAL_ASSETS)
+    answer_json = {"sentences": [{
+        "text": "Apple's total assets were $364,980 million.",
+        "atoms": [{"text": atom.text, "doc_id": atom.doc_id,
+                   "char_start": atom.char_start, "char_end": atom.char_end}],
+    }]}
+    entries = [
+        {"kind": "check_support", "query": "executive compensation table",
+         "status": "supported"},                       # a DIFFERENT, earlier question
+        {"kind": "verify", "ok": True, "answer": answer_json,
+         "frame": {"question": "What were Apple's total assets?", "constraints": []}},
+    ]
+    q = interactions_from_audit(entries, store)[0].question
+    assert q == "What were Apple's total assets?"
+    assert "executive compensation" not in q, "a neighbour's query must never be shown"
+
+
+def test_a_frameless_record_labels_its_fallback_as_a_query(store):
+    """Pre-D13 records carry no frame. The nearest query is all that survives, so it is
+    shown — but never dressed up as the question, because a retrieval string presented
+    as a reviewer's question misrepresents what was asked."""
+    from cairn.evidence_view import interactions_from_audit
+
+    atom = _bind(store, "364,980", TOTAL_ASSETS)
+    entries = [
+        {"kind": "check_support", "query": "apple total assets", "status": "supported"},
+        {"kind": "verify", "ok": True, "answer": {"sentences": [{
+            "text": "Apple's total assets were $364,980 million.",
+            "atoms": [{"text": atom.text, "doc_id": atom.doc_id,
+                       "char_start": atom.char_start, "char_end": atom.char_end}]}]}},
+    ]
+    q = interactions_from_audit(entries, store)[0].question
+    assert "not logged" in q and "apple total assets" in q
+
+    # …and with nothing to fall back to, it says so rather than inventing one.
+    bare = interactions_from_audit([entries[1]], store)[0].question
+    assert bare == "(question not in log)"
 
 
 def test_correction_renders_distinctly(store):
@@ -213,19 +265,26 @@ def test_sessions_from_audit_groups_by_marker(store):
                           "atoms": [{"text": atom.text, "doc_id": atom.doc_id,
                                      "char_start": atom.char_start,
                                      "char_end": atom.char_end}]}]}
+    def _frame(q):
+        return {"question": q, "constraints": []}
+
     entries = [
         {"kind": "check_support", "query": "pre-marker q", "status": "supported"},
-        {"kind": "verify", "ok": True, "answer": ans},               # unmarked preamble
+        {"kind": "verify", "ok": True, "answer": ans,                # unmarked preamble
+         "frame": _frame("What did the preamble ask?")},
         session_start_record("morning review", "2026-07-06T09:00:00"),
-        {"kind": "check_support", "query": "total assets?", "status": "supported"},
-        {"kind": "verify", "ok": True, "answer": ans},
+        {"kind": "check_support", "query": "total assets", "status": "supported"},
+        {"kind": "verify", "ok": True, "answer": ans,
+         "frame": _frame("What were total assets?")},
         session_start_record("afternoon", "2026-07-06T14:00:00"),   # empty session kept
     ]
     groups = sessions_from_audit(entries, store)
     assert [g["label"] for g in groups] == ["(unmarked)", "morning review", "afternoon"]
     assert [len(g["interactions"]) for g in groups] == [1, 1, 0]
     assert groups[1]["ts"] == "2026-07-06T09:00:00"
-    assert groups[1]["interactions"][0].question == "total assets?"
+    assert groups[1]["interactions"][0].question == "What were total assets?"
+    # A session boundary also ends a query's reach: the preamble's question stays put.
+    assert groups[0]["interactions"][0].question == "What did the preamble ask?"
 
 
 # --- RT-4: companion figures in the document view ---
