@@ -23,6 +23,7 @@ import html
 import json
 
 from .annotate import box_to_display
+from .refresh import button
 
 
 def _e(s: object) -> str:
@@ -213,7 +214,7 @@ def render(items, *, reviewer: str | None, on: str | None,
     return _PAGE.replace("{{ROWS}}", "".join(rows) or empty) \
                 .replace("{{WHO}}", who) \
                 .replace("{{AMBS}}", _ambiguities(list(ambiguities), sheet_files)) \
-                .replace("{{N}}", str(len(items)))
+                .replace("{{N}}", str(len(items))) + button()
 
 
 _PAGE = r"""<meta charset="utf-8"><title>Adjudicate</title>

@@ -30,10 +30,13 @@ should be a decision with its own row.
 
 from __future__ import annotations
 
+import datetime as _dt
 import http.server
 import ipaddress
 import json
 import socketserver
+import subprocess
+import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -44,6 +47,16 @@ MAX_BODY = 64 * 1024          # a query is small; a large body is a mistake or a
 
 class NotLoopback(RuntimeError):
     """Refused to bind a non-loopback address (D49)."""
+
+
+_REPO = Path(__file__).resolve().parent.parent.parent
+
+
+def _today() -> str:
+    """Today, for a rebuild's --on. A judgment's date comes from the SERVER's identity
+    (D71); this is only the build stamp, and stamping it with the day the console was
+    first built would age silently."""
+    return _dt.date.today().isoformat()
 
 
 def require_loopback(host: str) -> None:
@@ -221,6 +234,49 @@ def make_handler(tools: dict[str, Tool], root: Path, port: int, *,
                 return
             super().do_GET()
 
+        def _rebuild(self) -> None:
+            """Re-run the console build, so a ruling reaches the pages that show it.
+
+            The console is a STATIC build: a judgment lands in the log immediately, but
+            every surface derived from it — the queue, the reconciliation counts, the
+            interpretation panel, the marks on a sheet — is HTML written at build time.
+            Reloading the browser re-fetches the same bytes, so the reviewer's own
+            decision appears to have done nothing until someone re-runs a script from a
+            terminal. That is a loop with a manual step in the middle of it (D79).
+
+            The build arguments come from `build.json`, which the build itself writes,
+            rather than from a second copy of that CLI's surface kept in step by hand.
+            """
+            spec = root / "build.json"
+            if not spec.exists():
+                self._json(409, {"error": "this console has no build.json — it predates "
+                                          "the refresh button. Re-run "
+                                          "scripts/build_console.py once and the button "
+                                          "will work from then on."})
+                return
+            try:
+                cfg = json.loads(spec.read_text())
+            except json.JSONDecodeError as e:
+                self._json(409, {"error": f"build.json is unreadable: {e}"})
+                return
+            argv = [sys.executable, str(_REPO / "scripts" / "build_console.py"),
+                    "--store", cfg["store"], "--audit", cfg["audit"],
+                    "--out", cfg["out"], "--on", _today()]
+            for flag in ("doc", "engagement", "reviewer"):
+                if cfg.get(flag):
+                    argv += [f"--{flag}", cfg[flag]]
+            # cwd=_REPO because build.json records paths as the operator typed them,
+            # which are relative to the repo root. Resolving them against whatever
+            # directory the server happens to have been started from would make the
+            # button work from one shell and fail from another.
+            proc = subprocess.run(argv, capture_output=True, text=True, timeout=600,
+                                  cwd=str(_REPO))
+            if proc.returncode != 0:
+                tail = (proc.stderr or proc.stdout).strip().splitlines()
+                self._json(500, {"error": tail[-1] if tail else "the rebuild failed"})
+                return
+            self._json(200, {"rebuilt": True, "on": _today()})
+
         def do_POST(self) -> None:               # noqa: N802 — stdlib naming
             if not origin_allowed(self.headers.get("Origin"), port):
                 self._json(403, {"error": "cross-origin request refused (DNS-rebinding "
@@ -229,6 +285,9 @@ def make_handler(tools: dict[str, Tool], root: Path, port: int, *,
                 return
             if self.path == "/adjudicate":
                 self._adjudicate()
+                return
+            if self.path == "/rebuild":
+                self._rebuild()
                 return
             if not self.path.startswith("/tool/"):
                 self._json(404, {"error": "unknown endpoint"})

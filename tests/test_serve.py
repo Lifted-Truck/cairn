@@ -161,3 +161,74 @@ def test_judged_answers_from_the_live_log_so_a_stale_page_can_reconcile(tmp_path
             assert "already judged" in body["error"] and "ValueError" not in body["error"]
     finally:
         srv.shutdown()
+
+
+def test_rebuild_replays_the_build_the_console_recorded(tmp_path):
+    """D79: the console is a static build judged against for hours. A ruling lands in
+    the log at once, but every surface derived from it is HTML written at build time —
+    so reloading shows the reviewer's own decision having apparently done nothing.
+
+    The build arguments come from build.json, which the build itself writes, rather than
+    from a second copy of that CLI's surface kept in step by hand.
+    """
+    import json
+    import urllib.error
+    import urllib.request
+
+    (tmp_path / "index.html").write_text("<p>console</p>", encoding="utf-8")
+    srv = serve({}, tmp_path, port=0)
+    port = srv.server_address[1]
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    try:
+        # No build.json (a console predating the button) → a readable refusal, not a crash.
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/rebuild", method="POST",
+                                     data=b"{}",
+                                     headers={"Content-Type": "application/json"})
+        try:
+            urllib.request.urlopen(req)
+            raise AssertionError("a console with no build.json cannot be rebuilt")
+        except urllib.error.HTTPError as e:
+            body = json.loads(e.read())
+            assert e.code == 409 and "build.json" in body["error"]
+    finally:
+        srv.shutdown()
+
+
+def test_every_console_page_carries_the_refresh_control():
+    """A reviewer opens whichever pane the work is in and must never go looking for the
+    control that makes it current."""
+    from cairn.adjudicate_pane import render as adjudicate
+    from cairn.annotate_pane import render as annotate
+    from cairn.console import ConsoleState, Pane
+    from cairn.console import render as console
+
+    pages = [
+        adjudicate([], reviewer="J", on="2026-08-15"),
+        annotate([], reviewer="J", on="2026-08-15"),
+        console(ConsoleState(engagement="e", doc_ids=["D"], calibration="c",
+                             calibrated=True, contract="2.1", generated_on="2026-08-15",
+                             panes=[Pane("k", "L", "s", "p.html", "")])),
+    ]
+    for page in pages:
+        assert 'class="cairn-refresh"' in page
+        assert "fetch('rebuild'" in page
+        # the frame, not just the iframe: the header counts must refresh too
+        assert "(window.top || window).location.reload()" in page
+
+
+def test_the_refresh_control_never_displaces_a_page_s_charset():
+    """A browser only scans the first 1024 bytes for `<meta charset>`. Prepending the
+    control pushed the console frame's declaration to byte 1596, so the browser fell
+    back to latin-1 and the engagement title rendered as "US5447630A â€” patent
+    refresh" — mojibake on the frame, from a floating button that has no reason to be
+    anywhere but last."""
+    from cairn.console import ConsoleState, Pane
+    from cairn.console import render as console
+
+    page = console(ConsoleState(engagement="US5447630A — patent refresh",
+                                doc_ids=["D"], calibration="c", calibrated=True,
+                                contract="2.1", generated_on="2026-08-15",
+                                panes=[Pane("k", "L", "s", "p.html", "")]))
+    assert page.encode("utf-8").find(b"charset") < 1024
+    assert page.index("cairn-refresh") > page.index("charset")

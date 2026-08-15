@@ -21,6 +21,8 @@ from __future__ import annotations
 import html
 import json
 
+from .refresh import button
+
 
 def _e(s: object) -> str:
     return html.escape(str(s), quote=True)
@@ -43,7 +45,7 @@ def render(sheets: list[dict], *, reviewer: str | None, on: str | None) -> str:
            "recorded. Restart the server with --reviewer and --on.")
     return (_PAGE.replace("{{OPTS}}", opts or "<option>no sheets</option>")
                  .replace("{{WHO}}", who)
-                 .replace("{{SHEETS}}", json.dumps(sheets)))
+                 .replace("{{SHEETS}}", json.dumps(sheets)) + button())
 
 
 _PAGE = r"""<meta charset="utf-8"><title>Mark a sheet</title>

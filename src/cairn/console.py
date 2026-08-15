@@ -27,6 +27,8 @@ import html
 import json
 from dataclasses import dataclass, field
 
+from .refresh import button
+
 
 @dataclass
 class Pane:
@@ -102,7 +104,7 @@ def render(state: ConsoleState) -> str:
         tabs="".join(tabs),
         bodies="".join(bodies),
         pane_json=json.dumps([p.key for p in state.panes]),
-    )
+    ) + button()
 
 
 _PAGE = """<meta charset="utf-8"><title>Cairn — {engagement}</title>

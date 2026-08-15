@@ -16,6 +16,7 @@ still works on its own if opened directly.
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -277,6 +278,16 @@ def main() -> int:
                             ambiguities=ambiguities),
             encoding="utf-8")
     (out / "index.html").write_text(render(state), encoding="utf-8")
+
+    # How this console was built, so the review server can rebuild it on request
+    # without a second copy of this CLI's surface to keep in step (D79). The console
+    # describing its own construction is also the honest thing for a directory a
+    # reviewer may find months later.
+    (out / "build.json").write_text(json.dumps({
+        "store": str(store_dir), "audit": ns.audit, "doc": ns.doc,
+        "engagement": ns.engagement, "reviewer": ns.reviewer, "out": str(out),
+    }, indent=2) + "\n", encoding="utf-8")
+
     built = [p.label for p in panes if p.page]
     print(f"\nOK — {out / 'index.html'}")
     print(f"  panes with content: {', '.join(built) or 'none'}")
