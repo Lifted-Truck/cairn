@@ -105,3 +105,40 @@ def test_an_empty_queue_is_not_called_a_clean_bill_of_health():
     assert "Nothing outstanding" in text
     assert "not a clean bill of health" in text
     assert "invisible to all of them" in text
+
+
+def test_each_located_row_shows_the_sheet_where_the_question_is_asked():
+    """"Is 20 really drawn here?" is unanswerable from a description. Before this the
+    queue asked exactly that and showed nothing, leaving the reviewer to open the
+    Drawings pane and find the spot by eye for every row — which invites judging the
+    description of the evidence instead of the evidence."""
+    q = build(_cov(drawn_not_recited=["20"]),
+              [_Sighting("20", 2, (0.4836, 0.2567, 0.018, 0.012))])
+    page = pane(q, reviewer="J. Smith", on="2026-07-28",
+                sheet_files={2: "drawings-page-2.png"})
+    assert "class='crop'" in page
+    assert "data-file='drawings-page-2.png'" in page
+    # The ring's centre in DISPLAY space, not the raw manifest corner: manifest y is
+    # measured from the bottom to the box's lower edge (annotate.box_to_display).
+    assert "data-x='0.492600'" in page       # 0.4836 + 0.018/2
+    assert "data-y='0.737300'" in page       # 1 - (0.2567 + 0.012) + 0.012/2
+    assert "sheets/" in page, "the crop reads the sheet copied beside the console"
+
+
+def test_a_row_with_no_location_says_so_instead_of_framing_empty_space():
+    """A recited-not-drawn flag has no coordinates by construction — that absence IS the
+    finding. An empty frame would read as "looked here, found nothing", which asserts a
+    location the system does not have."""
+    q = build(_cov(recited_not_drawn=["77"]), [])
+    page = pane(q, reviewer="J. Smith", on="2026-07-28", sheet_files={2: "p2.png"})
+    assert "class='crop'" not in page
+    assert "not located on any sheet" in page
+
+
+def test_the_crop_is_omitted_when_the_sheet_image_is_missing():
+    """Sheets are optional (an engagement may have text only). No image, no frame."""
+    q = build(_cov(drawn_not_recited=["20"]),
+              [_Sighting("20", 2, (0.48, 0.25, 0.02, 0.01))])
+    page = pane(q, reviewer="J. Smith", on="2026-07-28", sheet_files={})
+    assert "class='crop'" not in page
+    assert "no sheet image available for page 2" in page

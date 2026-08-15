@@ -229,8 +229,13 @@ def main() -> int:
                            "marks": marks})
         (out / "annotate.html").write_text(
             annotate_pane(sheets, reviewer=ns.reviewer, on=judged_on), encoding="utf-8")
+        # The same sheets the annotate pane uses, keyed by page: the adjudicate queue
+        # shows a zoomed crop per row, so "is 20 really drawn here?" is answerable
+        # where it is asked rather than in another pane.
         (out / "adjudicate.html").write_text(
-            adjudicate_pane(queue, reviewer=ns.reviewer, on=judged_on), encoding="utf-8")
+            adjudicate_pane(queue, reviewer=ns.reviewer, on=judged_on,
+                            sheet_files={s["page"]: s["file"] for s in sheets}),
+            encoding="utf-8")
     (out / "index.html").write_text(render(state), encoding="utf-8")
     built = [p.label for p in panes if p.page]
     print(f"\nOK — {out / 'index.html'}")

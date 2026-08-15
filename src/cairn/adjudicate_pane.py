@@ -22,12 +22,59 @@ from __future__ import annotations
 import html
 import json
 
+from .annotate import box_to_display
+
 
 def _e(s: object) -> str:
     return html.escape(str(s), quote=True)
 
 
-def render(items, *, reviewer: str | None, on: str | None) -> str:
+def _crop(item, sheet_files: dict[int, str]) -> str:
+    """A zoomed window of the sheet centred on the flagged spot, with the spot ringed.
+
+    Scaled in the browser rather than pre-cropped in Python, because the sheet image is
+    already copied beside the console and a second cropped copy per row would duplicate
+    a confidential drawing many times over on disk for no gain.
+
+    A `recited_not_drawn` item has no coordinates by construction — that IS the flag —
+    so it gets a stated absence rather than an empty frame, which would read as "the
+    system looked and found nothing here" instead of "the system has no location".
+
+    The centre is computed here, through `annotate.box_to_display`, and NOT in the
+    page's JavaScript. Manifest `y` is measured from the BOTTOM to the box's lower
+    edge; a browser wants distance from the top. The first version of this crop did the
+    arithmetic in JS as if `y` were top-down, and put the ring beside numeral 12 rather
+    than on it — the exact failure `box_to_display`'s docstring warns about ("one
+    tested function and one hopeful line of JavaScript"). The tested half now owns it.
+    """
+    file = sheet_files.get(item.page) if item.page is not None else None
+    if file is None or item.x is None or item.y is None:
+        why = ("nothing to show — this numeral was not located on any sheet, which is "
+               "the flag itself" if item.page is None else
+               f"no sheet image available for page {item.page}")
+        return f"<p class='nocrop'>{_e(why)}</p>"
+    d = box_to_display(item.x, item.y, item.w or 0.0, item.h or 0.0)
+    cx, cy = d["left"] + d["width"] / 2, d["top"] + d["height"] / 2
+    return (f"<div class='crop' data-file='{_e(file)}' "
+            f"data-x='{cx:.6f}' data-y='{cy:.6f}'>"
+            f"<img alt='sheet {_e(item.page)} near numeral {_e(item.label)}'>"
+            f"<span class='ring'></span></div>"
+            f"<p class='cropcap'>Sheet {_e(item.page)} at "
+            f"({cx:.3f}, {cy:.3f} from the top-left) — the ring is where OCR placed "
+            f"<b>{_e(item.label)}</b>. Zoom, or open the Drawings pane for the "
+            f"whole sheet.</p>")
+
+
+def render(items, *, reviewer: str | None, on: str | None,
+           sheet_files: dict[int, str] | None = None) -> str:
+    """`sheet_files` maps page → the sheet image beside the console (`sheets/<file>`).
+
+    Without it the queue asks "is 20 really drawn here?" and shows nothing to look at,
+    which leaves the reviewer to open the Drawings pane, find the sheet, and locate the
+    spot by eye — for every row. A judgment surface that does not show the evidence
+    invites judgment made on the description of the evidence.
+    """
+    sheet_files = sheet_files or {}
     rows = []
     for i in items:
         loc = (f"p.{i.page}" if i.page is not None else "not located")
@@ -41,11 +88,12 @@ def render(items, *, reviewer: str | None, on: str | None) -> str:
             f"<span class='loc'>{_e(loc)}</span></div>"
             f"<p class='q'>{_e(i.question)}</p>"
             f"<p class='d'>{_e(i.detail)}</p>"
-            f"<div class='acts'>"
-            f"<button data-kind='confirm'>It is there</button>"
-            f"<button data-kind='refute'>It is not there</button>"
-            f"<button data-kind='note' class='ghost'>Note only</button>"
-            f"<span class='said'></span></div></li>")
+            + _crop(i, sheet_files) +
+            "<div class='acts'>"
+            "<button data-kind='confirm'>It is there</button>"
+            "<button data-kind='refute'>It is not there</button>"
+            "<button data-kind='note' class='ghost'>Note only</button>"
+            "<span class='said'></span></div></li>")
 
     who = (f"Recording as <b>{_e(reviewer)}</b> on {_e(on)}."
            if reviewer and on else
@@ -96,6 +144,17 @@ button.ghost{font-weight:400;color:var(--mut)}
 button:disabled{opacity:.5;cursor:default}
 .said{font-size:12.5px;color:var(--ok)}
 .said.bad{color:var(--warn)}
+.crop{position:relative;width:100%;max-width:420px;height:190px;overflow:hidden;
+ border:1px solid var(--rule);border-radius:6px;background:#fff;margin:0 0 5px}
+.crop img{position:absolute;max-width:none;image-rendering:auto}
+.crop .ring{position:absolute;left:50%;top:50%;width:44px;height:34px;
+ transform:translate(-50%,-50%);border:2px solid #c8402c;border-radius:4px;
+ box-shadow:0 0 0 9999px rgba(0,0,0,.10);pointer-events:none}
+.crop .zoom{position:absolute;right:6px;bottom:6px;display:flex;gap:4px}
+.crop .zoom button{padding:1px 8px;font:600 13px var(--mono);opacity:.9}
+.cropcap{margin:0 0 11px;font:12px var(--sans);color:var(--mut);max-width:72ch}
+.nocrop{margin:0 0 11px;font:12.5px var(--sans);color:var(--mut);
+ padding:8px 11px;background:var(--bg);border:1px dashed var(--rule);border-radius:6px}
 .empty{background:var(--panel);border:1px solid var(--rule);border-radius:9px;
  padding:18px;color:var(--mut);font-size:13.5px}
 .note{margin-top:26px;padding-top:14px;border-top:1px solid var(--rule);
@@ -113,7 +172,36 @@ button:disabled{opacity:.5;cursor:default}
   supersedes the old one, and both remain readable.</p>
 </div>
 <script>
-document.querySelectorAll('.item button').forEach(btn => {
+// Position each crop so the flagged point sits at the frame's centre, under the ring.
+// x/y are fractions of the sheet, so the maths needs the image's DISPLAYED size, which
+// is only known after load — hence a load handler rather than inline styles.
+document.querySelectorAll('.crop').forEach(box => {
+  const img = box.querySelector('img');
+  let z = 5;                                   // starting magnification
+  function place() {
+    const w = box.clientWidth * z;
+    img.style.width = w + 'px';
+    const h = img.clientHeight;                // set by the width, aspect preserved
+    img.style.left = (box.clientWidth / 2 - box.dataset.x * w) + 'px';
+    img.style.top  = (box.clientHeight / 2 - box.dataset.y * h) + 'px';
+  }
+  img.addEventListener('load', place);
+  img.src = 'sheets/' + box.dataset.file;
+  const zoom = document.createElement('div');
+  zoom.className = 'zoom';
+  for (const [lbl, f] of [['−', 1 / 1.6], ['+', 1.6]]) {
+    const b = document.createElement('button');
+    b.textContent = lbl;
+    b.addEventListener('click', () => {
+      z = Math.min(24, Math.max(1, z * f));    // 1 = whole sheet width, 24 = glyph level
+      place();
+    });
+    zoom.appendChild(b);
+  }
+  box.appendChild(zoom);
+});
+
+document.querySelectorAll('.item .acts button').forEach(btn => {
   btn.addEventListener('click', async () => {
     const li = btn.closest('.item');
     const said = li.querySelector('.said');

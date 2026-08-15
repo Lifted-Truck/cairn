@@ -38,8 +38,10 @@ class QueueItem:
     rank: int             # 1 = most consequential
     label: str            # the numeral or marker at issue
     page: int | None
-    x: float | None
+    x: float | None       # manifest coords: BOTTOM-left origin, x/y = the box's lower-left
     y: float | None
+    w: float | None
+    h: float | None
     question: str         # what the reviewer is being asked, in their words
     detail: str           # the evidence behind the flag
 
@@ -52,13 +54,19 @@ _RANK = {
 }
 
 
-def _where(sightings, label: str) -> tuple[int | None, float | None, float | None]:
-    """The first located position of a label, for a reviewer who wants to look at it."""
+def _where(sightings, label: str):
+    """The first located position of a label, for a reviewer who wants to look at it.
+
+    Returns `(page, x, y, w, h)` — the whole box, not just its corner. The width and
+    height are what let a display centre be computed through `annotate.box_to_display`,
+    the tested half of the y-flip pair; without them a consumer has to guess at the
+    flip, and the first one that did put its crop on the wrong part of the sheet.
+    """
     for s in sightings:
         if str(s.numeral) == str(label):
             bb = getattr(s, "bbox", None) or (None, None, None, None)
-            return getattr(s, "page", None), bb[0], bb[1]
-    return None, None, None
+            return (getattr(s, "page", None), bb[0], bb[1], bb[2], bb[3])
+    return None, None, None, None, None
 
 
 def build(coverage, sightings, *, adjudicated: set[str] | None = None) -> list[QueueItem]:
@@ -72,20 +80,20 @@ def build(coverage, sightings, *, adjudicated: set[str] | None = None) -> list[Q
     items: list[QueueItem] = []
 
     for label in getattr(coverage, "drawn_not_recited", []):
-        page, x, y = _where(sightings, label)
+        page, x, y, w, h = _where(sightings, label)
         items.append(QueueItem(
             f"drawn_not_recited:{label}", "drawn_not_recited", _RANK["drawn_not_recited"],
-            str(label), page, x, y,
+            str(label), page, x, y, w, h,
             f"Is “{label}” really drawn here?",
             "Located on a sheet but never recited in the specification. If the tool "
             "misread a mark, refuting it removes a location the document does not support."))
 
     for m in getattr(coverage, "figure_mismatches", []):
         label = m.get("numeral", "?")
-        page, x, y = _where(sightings, label)
+        page, x, y, w, h = _where(sightings, label)
         items.append(QueueItem(
             f"figure_mismatch:{label}", "figure_mismatch", _RANK["figure_mismatch"],
-            str(label), page, x, y,
+            str(label), page, x, y, w, h,
             f"Where does “{label}” actually appear?",
             m.get("message", "Recited for one figure, located on another sheet.")))
 
@@ -93,10 +101,10 @@ def build(coverage, sightings, *, adjudicated: set[str] | None = None) -> list[Q
         if not m.get("unresolved"):
             continue
         label = m.get("numeral", "?")
-        page, x, y = _where(sightings, label)
+        page, x, y, w, h = _where(sightings, label)
         items.append(QueueItem(
             f"unresolved_conflict:{label}", "unresolved_conflict",
-            _RANK["unresolved_conflict"], str(label), page, x, y,
+            _RANK["unresolved_conflict"], str(label), page, x, y, w, h,
             f"Which reading of this mark is right — “{label}” or the alternative?",
             m.get("message", "Two engines read one mark differently and nothing "
                              "reconciled them.")))
@@ -104,7 +112,7 @@ def build(coverage, sightings, *, adjudicated: set[str] | None = None) -> list[Q
     for label in getattr(coverage, "recited_not_drawn", []):
         items.append(QueueItem(
             f"recited_not_drawn:{label}", "recited_not_drawn", _RANK["recited_not_drawn"],
-            str(label), None, None, None,
+            str(label), None, None, None, None, None,
             f"Can you see “{label}” on a sheet?",
             "The specification recites it; OCR located it nowhere. Usually an OCR miss — "
             "confirming it needs the position, so use the Drawings pane to find it first."))
