@@ -63,3 +63,7 @@ corpus/engagements/
 # Dev-server launch config: points at a gitignored engagement store and names a
 # reviewer, so it is machine-local by construction -- it would not resolve in a clone.
 .claude/launch.json
+
+# Verify run state (last-verify.json, dirty). Regenerated every run, and a
+# committed one would report another machine's result as this tree's.
+.harness/

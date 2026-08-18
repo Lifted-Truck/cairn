@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# verify — oracle dispatcher. The harness's only interface to project QC.
+# Usage: ./verify fast | full | report
+# Contract: exit 0 = green, nonzero = red. Writes .harness/last-verify.json.
+#
+# THIS FILE IS PROJECT-OWNED: edit `fast` and `full` freely, add project gates,
+# wire your test commands. The kit-owned gates live in `.kit/kit-gates.sh`,
+# which is vendored and checksummed — do not edit that one, and do not copy its
+# contents here. Update it with:  python3 <kit>/kit_sync.py .
+set -uo pipefail
+
+TARGET="${1:-fast}"
+HARNESS_DIR=".harness"
+mkdir -p "$HARNESS_DIR"
+
+# Kit-owned gates: record, leak_gate, kit_integrity. A repo missing this file
+# is not a lesser repo, it is an UNGATED one, so failing loudly beats degrading
+# quietly — a silently skipped privacy gate is exactly the shape of bug the
+# gate exists to prevent.
+if [ -r .kit/kit-gates.sh ]; then
+  . .kit/kit-gates.sh
+else
+  echo "verify: .kit/kit-gates.sh missing — run kit_sync.py (gates cannot be skipped)" >&2
+  exit 1
+fi
+
+fast() {
+  # ---- Layer-0: seconds, not minutes. CI-blocking. -------------------------
+  local ok=0
+  kit_integrity || ok=1      # kit-owned files must match .kit/MANIFEST
+  leak_gate     || ok=1      # privacy gate: kit-core, keep it first
+  # ---- Project gates: the Layer-0 oracle (CLAUDE.md "the gate"). ----------
+  # Deterministic, seeded, no model calls. This is the same pair CI runs, so a
+  # green ./verify fast and a green CI can never disagree.
+  local PY=".venv/bin/python"
+  [ -x "$PY" ] || PY="python3"
+  "$PY" -m ruff check . || ok=1
+  # NEVER pipe pytest through head/tail here: it masks the exit code, and a
+  # failure that looks like success is the one outcome an oracle may not have.
+  "$PY" -m pytest -m layer0 -q || ok=1
+  return $ok
+}
+
+full() {
+  fast || return $?
+  # ---- Layer-E is deliberately NOT wired here. ----------------------------
+  # The truth contract says Layer-E is MEASURED, never gated: it makes real
+  # (billed) model calls, and an oracle that costs money per run is one people
+  # stop running. Gating on it would also contradict the contract's own
+  # statement of what is guaranteed versus what is observed.
+  #   scripts/run_layer_e.py        # behavioural evals — by hand, with intent
+  #   scripts/calibrate_threshold.py --write
+  # Everything deterministic already runs in `fast`, so `full` adds nothing
+  # today rather than pretending to a second tier that does not exist.
+  return 0
+}
+
+case "$TARGET" in
+  fast)   fast;  record fast  $? ;;
+  full)   full;  record full  $? ;;
+  report) cat "$HARNESS_DIR/last-verify.json" 2>/dev/null || { echo '{"target":null,"exit":null}'; exit 1; } ;;
+  *)      echo "usage: ./verify fast|full|report" >&2; exit 64 ;;
+esac

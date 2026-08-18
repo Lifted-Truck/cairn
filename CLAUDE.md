@@ -13,6 +13,7 @@ and [`CAIRN_build_brief.md`](CAIRN_build_brief.md) for full architecture and rat
 ## Source-of-truth hierarchy
 
 - [`CAIRN_build_brief.md`](CAIRN_build_brief.md) — architecture, invariants, rationale. **Wins on *design*.**
+- [`DECISIONS.md`](DECISIONS.md) — the append-only decision log (D1–D83+). **Wins on *what was already settled and why*;** binding on later work.
 - [`ROADMAP.md`](ROADMAP.md) — status and sequencing. **Wins on *what to do next*.** When the two disagree, that split holds.
 - [`golden_seed.json`](golden_seed.json) — the ground-truth eval set (20 items, Apple FY2024 10-K).
 - [`CAIRN_Patent_Tailoring_Consideration.md`](CAIRN_Patent_Tailoring_Consideration.md) — patent-domain specialization for the **first client engagement**. Provisional; **subordinate to `ROADMAP.md`**. Wins on patent-domain design where it doesn't conflict.
@@ -34,7 +35,7 @@ or definitive claim construction (a patent professional is in the loop; UPL boun
 
 ## How to pick up work
 
-1. Read **▶ Current focus** in [`ROADMAP.md`](ROADMAP.md). Take the topmost unchecked task in that milestone. **Read the Decisions log (D1–D14)** — they are binding; don't contradict them.
+1. Read **▶ Current focus** in [`ROADMAP.md`](ROADMAP.md). Take the topmost unchecked task in that milestone. **Read [`DECISIONS.md`](DECISIONS.md)** — every `D#` is binding; don't contradict one.
 2. Implement to the task's **acceptance criteria (AC)**. State which invariants (I1–I6) it touches and how its tests cover them.
 3. A milestone is `DONE` only when its **Gate** passes. Don't begin the next milestone — or **anything under Backlog (v2)** — until then.
 
@@ -47,7 +48,7 @@ or definitive claim construction (a patent professional is in the loop; UPL boun
   2. Append a **Changelog** line: `YYYY-MM-DD · M#-T# · short note`.
   3. Advance **▶ Current focus** to the next task.
   4. `git push` and confirm CI is green.
-- **New design decisions get a new `D#` row** in the ROADMAP Decisions table with rationale. The Decisions log and the golden oracle are append-only and binding — don't quietly change behavior that a `D#` established.
+- **New design decisions get a new `D#` row** in [`DECISIONS.md`](DECISIONS.md) with rationale. The Decisions log and the golden oracle are append-only and binding — don't quietly change behavior that a `D#` established.
 
 ## Setup, the gate, and where things live
 
@@ -73,7 +74,7 @@ Each maps to a standing test. A change that violates one does not merge.
 ## Engineering rules
 
 - **Determinism is law on the evidence path.** Anything touching retrieval, span-mapping, or verification runs seeded / temperature 0. Non-determinism there is a bug, not a tuning knob.
-- **The oracle is sacred.** Don't weaken a gate to make a PR pass. If a gate is genuinely wrong, change it in its own PR with rationale logged in the Decisions table.
+- **The oracle is sacred.** Don't weaken a gate to make a PR pass. If a gate is genuinely wrong, change it in its own PR with rationale logged in `DECISIONS.md`.
 - **Invariant tests are CI, not afterthoughts.** I3/I4/I5/I6 each get a standing per-PR test from M1 onward.
 - **CAIRN composes nothing in v1.** The agent drafts prose; CAIRN tools are pure deterministic functions. No `answer_with_citations` tool.
 - **The corpus adapter is isolated.** All corpus-specific code lives in the ingestion module so a corpus swap touches one file.
@@ -152,3 +153,24 @@ like a log.
 ### LIBRARY entry template
 `[Lxxxx] <title> | tier | added: YYYY-MM-DD | tags: … | lesson: … | evidence: … | falsifier: … | supersedes: …`
 <!-- KNOWLEDGE-LOOP:END -->
+
+<!-- kit:mailbox v2.1.0 — appended by /retrofit; edit freely, keep the three answers -->
+## Mailbox
+
+Cross-repo exchanges are files, not chat (doctrine `INTEGRATIONS.md` §2). Three
+questions, answered once so no session has to guess:
+
+- **Who owes me anything?** Briefs addressed to Cairn land in **`integrations/` in
+  this repo** — that directory is our mailbox and the only place to look for work
+  filed at us.
+- **Did anyone answer my brief?** Responses to briefs *we* filed live in the
+  **provider's** tree (e.g. `autonomous/integrations/attest/`), not here. They do
+  not arrive; they must be pulled and read.
+- **Should I act on an exchange between two other repos?** Read it freely if it is
+  useful context — but it is not ours to act on, and not ours to raise to Julian as
+  though it were. If it genuinely concerns Cairn, the response is to file our own
+  brief, which puts it in a mailbox someone owes an answer to.
+
+Decisions never live in `integrations/`. An exchange records what was said; what was
+*decided* goes in `DECISIONS.md` in the same change.
+<!-- /kit:mailbox -->
