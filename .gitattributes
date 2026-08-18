@@ -1,0 +1,18 @@
+# LF in the repository on every platform — load-bearing, not cosmetic.
+#
+# Git for Windows defaults to `core.autocrlf=true`, which rewrites text files
+# to CRLF on checkout. Identical content then has different BYTES on the two
+# machines, which silently breaks every byte-comparison gate in this ecosystem
+# (sweep's `content_hash`, hash ledgers, golden renders, byte-identical replay)
+# — the gate fails on Windows for a reason that has nothing to do with the
+# change under test, or worse, a hash-keyed cache quietly misses forever.
+#
+# `text=auto` still lets each working tree use its native endings; only what
+# git STORES is normalized. Binary files are auto-detected and left alone.
+* text=auto eol=lf
+
+# Shell entry points must stay LF even if a tool would guess otherwise: a
+# CRLF shebang line makes the kernel look for an interpreter named "bash\r"
+# and fail with a bare, unexplained "command not found".
+verify text eol=lf
+*.sh text eol=lf
