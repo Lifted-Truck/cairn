@@ -1,11 +1,16 @@
 {
   "schema": "project-manifest.0 (draft — kit v2 will formalize)",
+  "kit_version": "2.5.0",
   "status": "RATIFIED 2026-06-24 (M0 scaffold merged); contract 2.0 as of 2026-08-09",
   "survey": {
     "what_is_it": "library/tooling — grounded-retrieval tools (MCP server + CLI) an agent calls: ground or abstain, never invent. Cairn makes no model calls on the deciding path.",
     "architecture_rung": {
       "choice": 1,
-      "menu": ["1: single thread", "2: thread + subagents/verifier", "3: organ fleet"],
+      "menu": [
+        "1: single thread",
+        "2: thread + subagents/verifier",
+        "3: organ fleet"
+      ],
       "earned_by": "A single primary agent on main. The evidence path is pure deterministic functions with a CI-blocking oracle, so a verifier rung would duplicate what the gate already does. Read-only research swarms have been spawned twice (OCR failure modes, attestation landscape) as bounded one-off investigations whose findings went to human triage — that is a tool used, not a rung earned."
     },
     "domain_core_llm_must_not_own": "Everything on the evidence path: retrieval, span resolution and hash verification, the support floor, constraint coverage, the audit chain, and the five outcome classes. A model may draft prose and judge entailment OFFLINE at Layer-E; it never decides whether a citation is real or whether evidence suffices. Human adjudication is likewise machine-unwritable (D47/D50).",
@@ -15,8 +20,12 @@
     },
     "second_implementation": false,
     "consumers_and_providers": {
-      "consumes": ["autonomous (doctrine, harness kit, MCP security-hardening brief)"],
-      "provides": ["an MCP tool surface (6 tools, stdio) for grounded retrieval over a hashed corpus"]
+      "consumes": [
+        "autonomous (doctrine, harness kit, MCP security-hardening brief)"
+      ],
+      "provides": [
+        "an MCP tool surface (6 tools, stdio) for grounded retrieval over a hashed corpus"
+      ]
     }
   },
   "invariants": {
