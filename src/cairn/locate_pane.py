@@ -1,28 +1,40 @@
-"""locate_pane — ask the corpus what it has, live (RT-10b, D49).
+"""locate_pane — ranked term search over the corpus (RT-10b, D49; reframed D81).
 
-**What this pane is not.** It does not answer questions. Cairn makes no model calls, so
-there is nothing here that could compose prose — and that is the design, not a gap. The
-reasoner is the agent in a Claude Code session; this pane runs the *locate* step it would
-run, and shows the reviewer the same evidence, with the same support decision, recorded to
-the same audit log.
+**A search box, not an oracle.** This pane used to run `check_support` and report its
+verdict — *supported* or *insufficient* — which was a mistake on this corpus and a
+confusing one. The support floor here is **non-separable** (D53/D55): answerable and
+content-absent questions overlap, so the verdict carries almost no information, and in
+practice nearly every query a reviewer typed came back as an abstention. A pane whose
+main output is a refusal the header already says is unreliable is worse than no pane.
 
-So the honest framing on the page is: **"what does this corpus have?"** — supporting spans
-above the floor, or `insufficient` plus the closest passages found, which is how the system
-shows it looked and where (D12). A reviewer reads spans and decides; the page never decides
-for them.
+So it does the honest thing instead: rank the spans by BM25 and show them. No floor, no
+verdict, no abstention — the reviewer reads passages and decides, which is all the
+support decision was ever standing in for here.
 
-The support decision is only as good as its floor, so the calibration state is repeated
-here rather than left to the console header alone — a reviewer who lands on this pane and
-reads `insufficient` is exactly the person who needs to know the floor came from a
-different corpus.
+**Still the real retrieval.** The page calls `search_corpus`, the same tool the agent
+calls, rather than reimplementing BM25 in JavaScript — a second retrieval implementation
+is a second oracle that can drift, in a system whose claim is that the same corpus and
+query give the same result (I6).
+
+When an agent is wired into this surface, the abstention decision belongs to *it*, with
+its reasoning shown — not to a floor that does not separate.
 """
 
 from __future__ import annotations
 
+from .refresh import button
 
-def render(*, calibrated: bool, calibration: str) -> str:
-    cls = "ok" if calibrated else "warn"
-    return _PAGE.replace("{{CAL_CLASS}}", cls).replace("{{CAL}}", calibration)
+
+def render(*, calibrated: bool = True, calibration: str = "") -> str:
+    """The arguments are kept and ignored on purpose.
+
+    They described the support floor, which this pane no longer applies — but the
+    calibration state still belongs to the console header, and the caller passing it
+    here is how it stays wired when an agent (with a real abstention decision) is put
+    behind this surface. Dropping the parameters would make that a signature change
+    rather than a body change.
+    """
+    return _PAGE + button()
 
 
 _PAGE = r"""<meta charset="utf-8"><title>Locate</title>
@@ -65,24 +77,33 @@ button:disabled{opacity:.55;cursor:default}
  font-size:12.5px;color:var(--mut);max-width:70ch}
 </style>
 <div class="wrap">
-  <h1>What does this corpus have?</h1>
-  <p class="sub">This runs the <b>locate</b> step and shows you the evidence. It does not
-  compose an answer — Cairn makes no model calls, so reading the spans and deciding what
-  they support is yours to do.</p>
-  <p class="cal {{CAL_CLASS}}">{{CAL}}</p>
+  <h1>Search the corpus</h1>
+  <p class="sub">Type terms; get the passages that contain them, best match first. This
+  is a <b>search box</b> — it does not decide whether anything answers your question, and
+  it never abstains.</p>
 
   <form id="f">
-    <input type="text" id="q" placeholder="e.g. what were total assets at year end?"
-           autocomplete="off" aria-label="Question">
-    <button id="go">Locate</button>
+    <input type="text" id="q" placeholder="e.g. magnetron wattage, dosing siphon, ash outlet"
+           autocomplete="off" aria-label="Search terms">
+    <button id="go">Search</button>
   </form>
-  <p class="hint">Recorded to the audit log, exactly as an agent's call would be.</p>
+  <p class="hint">Runs <code>search_corpus</code> — the same retrieval the agent uses, so
+  the two can never drift apart.</p>
 
   <div id="out"></div>
 
-  <p class="note">Below the support floor the system returns <b>insufficient</b> and shows
-  the closest passages it found — proof that it looked, and where. That is a content
-  judgment about this corpus, not a claim that the answer does not exist anywhere.</p>
+  <p class="note"><b>Matching is exact-word.</b> Retrieval does no stemming, so a query
+  in a different form from the document finds nothing at all — <code>magnetron</code>
+  returns no passages while <code>magnetrons</code> returns three. That, more than the
+  floor, is why natural-sounding questions used to come back empty here.</p>
+
+  <p class="note">This pane used to report a <b>support verdict</b> (supported /
+  insufficient). On this corpus that floor does <b>not separate</b> answerable questions
+  from content-absent ones, so the verdict carried almost no information and nearly every
+  query came back as an abstention. Ranking passages and letting you read them is the
+  honest version of what that decision was standing in for. When an agent is wired into
+  this pane, the abstention becomes <i>its</i> judgment, shown with its reasoning —
+  not a threshold that cannot tell the two cases apart.</p>
 </div>
 <script>
 const out = document.getElementById('out');
@@ -124,24 +145,24 @@ document.getElementById('f').addEventListener('submit', async ev => {
   btn.disabled = true;
   out.innerHTML = '<p class="hint">locating…</p>';
   try {
-    const r = await fetch('tool/check_support', {
+    const r = await fetch('tool/search_corpus', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({query: q})
+      body: JSON.stringify({query: q, k: 20})
     });
     const d = await r.json();
     if (d.error) { out.innerHTML = '<div class="err">' + esc(d.error) + '</div>'; return; }
-    const ok = d.status === 'supported';
-    let html = '<div class="verdict ' + esc(d.status) + '"><b>' +
-      (ok ? 'Supported — ' + d.supporting.length + ' span(s) clear the floor'
-          : 'Insufficient — nothing clears the floor') + '</b>' +
-      (ok ? 'Read them and decide what they support.'
-          : 'The closest passages found are shown, so you can see where it looked.') +
-      '</div>';
-    if (d.calibration_warning) {
-      html += '<div class="err">' + esc(d.calibration_warning) + '</div>';
+    const hits = d.hits || [];
+    if (!hits.length) {
+      out.innerHTML = '<div class="verdict"><b>No passage contains these terms.</b>' +
+        'Matching is on exact words \u2014 there is no stemming, so <i>magnetron</i> ' +
+        'finds nothing while <i>magnetrons</i> finds three passages. Try the ' +
+        'specification\u2019s own wording, including its plurals.</div>';
+      return;
     }
-    const hits = ok ? d.supporting : d.closest;
-    html += (await Promise.all(hits.map(h => spanCard(h, !ok)))).join('');
+    let html = '<div class="verdict"><b>' + hits.length + ' passage(s), best first</b>' +
+      'Ranked by term overlap (BM25). This is a search, not a judgment \u2014 nothing ' +
+      'here decides whether a passage answers your question.</div>';
+    html += (await Promise.all(hits.map(h => spanCard(h, false)))).join('');
     out.innerHTML = html;
   } catch (e) {
     out.innerHTML = '<div class="err">Could not reach the review server. Start it with ' +

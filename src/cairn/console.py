@@ -186,16 +186,26 @@ iframe{{width:100%;height:100%;border:0;background:var(--panel)}}
 
 <script>
 const PANES = {pane_json};
+// The open pane rides in the URL hash, so a refresh comes back to the work rather than
+// to the first tab. Rebuilding after every ruling is the normal rhythm here, and
+// re-navigating to the pane you were in each time is a tax on the loop (D81).
+function show(want) {{
+  if (!PANES.includes(want)) return false;
+  document.querySelectorAll('[role=tab]').forEach(function (t) {{
+    t.setAttribute('aria-selected', String(t.dataset.pane === want));
+  }});
+  PANES.forEach(function (k) {{
+    document.getElementById('pane-' + k).hidden = (k !== want);
+  }});
+  return true;
+}}
 document.querySelectorAll('[role=tab]').forEach(function (tab) {{
   tab.addEventListener('click', function () {{
-    const want = tab.dataset.pane;
-    document.querySelectorAll('[role=tab]').forEach(function (t) {{
-      t.setAttribute('aria-selected', String(t.dataset.pane === want));
-    }});
-    PANES.forEach(function (k) {{
-      document.getElementById('pane-' + k).hidden = (k !== want);
-    }});
+    if (show(tab.dataset.pane)) {{
+      history.replaceState(null, '', '#' + tab.dataset.pane);
+    }}
   }});
 }});
+show((location.hash || '').replace('#', ''));
 </script>
 """

@@ -71,29 +71,48 @@ def test_engagement_text_is_escaped():
     assert "&lt;script&gt;" in page
 
 
-def test_the_locate_pane_says_it_does_not_answer():
-    """The pane runs the LOCATE step and shows evidence. It cannot compose an answer —
-    Cairn makes no model calls — and saying so plainly is the design, not a disclaimer."""
+def test_the_locate_pane_is_a_search_box_and_says_so():
+    """D81: it used to report a support VERDICT. On this corpus the floor does not
+    separate answerable questions from content-absent ones, so the verdict carried almost
+    no information and nearly every query a reviewer typed came back as an abstention. A
+    pane whose main output is a refusal the header already calls unreliable is worse than
+    no pane."""
     from cairn.locate_pane import render as locate
-    page = locate(calibrated=True, calibration="Floor 15.1, calibrated.")
+    page = locate()
     text = _text(page)
-    assert "does not compose an answer" in text
-    assert "no model calls" in text
+    assert "does not decide" in text and "never abstains" in text
+    # Structural, not string-sniffing: the page explains the OLD behaviour in its
+    # footnote, so searching the prose for "supported" finds the explanation and fails.
+    # What must be gone is the CALL that produced a verdict.
+    assert "status === 'supported'" not in page
+    assert "d.supporting" not in page and "d.closest" not in page
 
 
-def test_the_locate_pane_repeats_the_calibration_state():
-    """A reviewer who lands here and reads 'insufficient' is exactly the person who needs
-    to know the floor came from a different corpus."""
+def test_the_locate_pane_runs_the_real_retrieval_not_a_second_one():
+    """A second BM25 in JavaScript would be a second oracle that can drift, in a system
+    whose claim is that the same corpus and query give the same result (I6)."""
     from cairn.locate_pane import render as locate
-    page = locate(calibrated=False, calibration="NO calibration record for this corpus.")
-    assert "NO calibration record" in page
-    assert 'class="cal warn"' in page
+    page = locate()
+    assert "tool/search_corpus" in page
+    assert "tool/check_support" not in page, "the floor is no longer applied here"
 
 
 def test_the_locate_pane_fetches_span_text_through_the_verifying_accessor():
     """The text a reviewer reads is fetched via get_span, which re-verifies the document
     hash (I3) — so it is exactly what verification would confirm, not a cached copy."""
     from cairn.locate_pane import render as locate
-    page = locate(calibrated=True, calibration="ok")
-    assert "tool/get_span" in page
-    assert "tool/check_support" in page
+    assert "tool/get_span" in locate()
+
+
+def test_the_open_pane_survives_a_refresh():
+    """D81: rebuilding after every ruling is the normal rhythm, so landing back on the
+    first tab each time is a tax on the loop. The open pane rides in the URL hash."""
+    from cairn.console import ConsoleState, Pane
+    from cairn.console import render as console
+    page = console(ConsoleState(
+        engagement="e", doc_ids=["D"], calibration="c", calibrated=True,
+        contract="2.1", generated_on="2026-08-15",
+        panes=[Pane("corpus", "Corpus", "s", "corpus.html", ""),
+               Pane("adjudicate", "Adjudicate", "s", "adjudicate.html", "")]))
+    assert "history.replaceState" in page
+    assert "location.hash" in page

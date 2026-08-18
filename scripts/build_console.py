@@ -245,6 +245,12 @@ def main() -> int:
         sheets = []
         import shutil
 
+        refutations = []
+        if adj_path.exists():
+            from cairn.adjudication import AdjudicationLog as _Log
+            refutations = [a for a in _Log(adj_path).effective()
+                           if a.kind == "refute" and a.target_kind == "figure-numeral"]
+
         from cairn.annotate import box_to_display
         from cairn.figures_map import load_manifest as _load_merged
         # The MERGED manifest, so reviewer marks appear beside OCR ones and can be
@@ -264,9 +270,21 @@ def main() -> int:
                               "human": n.get("method") == "human",
                               "by": n.get("by"), "on": n.get("on"),
                               "engines": ",".join(n.get("engines", []))})
+            # Marks the reviewer REMOVED, so the sheet can show what was taken out.
+            # Without this a refuted mark simply vanishes, and a label that occurs twice
+            # (page 2 carries two "32"s) reads as "the removal did not work" when what
+            # is left is its twin. Seeing the removal is what tells them apart.
+            removed = []
+            for a in refutations:
+                if a.target.get("page") != pg["page"] or a.target.get("x") is None:
+                    continue
+                d = box_to_display(a.target["x"], a.target["y"],
+                                   a.target.get("w", 0.02), a.target.get("h", 0.02))
+                removed.append({**d, "numeral": str(a.target.get("numeral", "?")),
+                                "by": a.by, "on": a.on, "adj_id": a.adj_id})
             sheets.append({"page": pg["page"], "file": pg["file"],
                            "figures": ",".join(f["fig"] for f in pg.get("fig_labels", [])),
-                           "marks": marks})
+                           "marks": marks, "removed": removed})
         (out / "annotate.html").write_text(
             annotate_pane(sheets, reviewer=ns.reviewer, on=judged_on), encoding="utf-8")
         # The same sheets the annotate pane uses, keyed by page: the adjudicate queue

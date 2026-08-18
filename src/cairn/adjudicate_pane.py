@@ -284,6 +284,10 @@ h2{font:600 15px/1.3 var(--sans);margin:26px 0 4px}
 .lbar select{padding:5px 8px;border:1px solid var(--rule);border-radius:6px;
  background:var(--bg);color:var(--ink);font:13px var(--sans)}
 .lbar button{padding:5px 11px;font-size:12.5px}
+/* An author `display` rule BEATS the `hidden` attribute's UA rule, so the frame showed
+   before the reviewer asked for a sheet -- an empty bordered box with a src-less image
+   in it, which reads as a broken preview. Restore the attribute's meaning explicitly. */
+.lstage[hidden]{display:none}
 .lstage{position:relative;display:inline-block;max-width:100%;
  border:1px solid var(--rule);border-radius:6px;overflow:hidden;background:#fff}
 .lstage img{display:block;max-width:100%;height:auto;touch-action:none}

@@ -88,6 +88,14 @@ button.ghost{background:var(--bg);color:var(--mut);border:1px solid var(--rule)}
  background:rgba(47,80,143,.12)}
 .mk:hover{background:rgba(63,107,82,.26)}
 .mk.on{border-width:2.5px;background:rgba(168,64,47,.22);border-color:var(--warn)}
+/* A mark the reviewer took off the sheet. Struck through and dashed: it is not evidence
+   any more, but it is a decision, and a decision you cannot see is one you cannot check. */
+.gone{position:absolute;border:1.5px dashed var(--warn);background:rgba(162,64,47,.10);
+ border-radius:2px;pointer-events:auto;cursor:pointer;opacity:.85}
+.gone::after{content:"";position:absolute;left:0;right:0;top:50%;
+ border-top:1.5px solid var(--warn)}
+.gone span{position:absolute;top:-15px;left:-1px;font:600 10px/1.4 var(--mono);
+ color:var(--warn);white-space:nowrap;text-decoration:line-through}
 .mk span{position:absolute;top:-15px;left:-1px;font:600 10px/1.4 var(--mono);
  background:var(--panel);border:1px solid var(--rule);border-radius:3px;padding:0 3px;
  white-space:nowrap}
@@ -119,9 +127,12 @@ button.danger{background:var(--warn)}
 
   <p class="legend"><label><input type="checkbox" id="show" checked> show the
   <b id="nmarks">0</b> marks already located on this sheet</label> — click one to revise
-  or remove it.</p>
+  or remove it. <label><input type="checkbox" id="showgone" checked> show the
+  <b id="ngone">0</b> you removed</label> — so a label that occurs twice does not read
+  as a removal that failed.</p>
 
   <div id="stage"><img id="sheet" alt="drawing sheet"><div id="marks"></div>
+   <div id="gone"></div>
    <div id="rect"></div></div>
   <p class="said" id="said"></p>
 
@@ -190,6 +201,51 @@ function deselect() {
   picked = null; selBox.hidden = true;
   document.querySelectorAll('.mk').forEach(e => e.classList.remove('on'));
 }
+const goneEl = document.getElementById('gone');
+function drawGone() {
+  const s = currentSheet(), on = document.getElementById('showgone').checked;
+  const list = s.removed || [];
+  document.getElementById('ngone').textContent = list.length;
+  goneEl.innerHTML = '';
+  if (!on) return;
+  list.forEach(g => {
+    const d = document.createElement('div');
+    d.className = 'gone';
+    Object.assign(d.style, {left: (g.left * 100) + '%', top: (g.top * 100) + '%',
+      width: (g.width * 100) + '%', height: (g.height * 100) + '%'});
+    d.innerHTML = '<span>' + g.numeral + ' removed</span>';
+    d.title = 'removed by ' + (g.by || 'a reviewer') + (g.on ? ' on ' + g.on : '') +
+              ' — click to put it back';
+    d.addEventListener('pointerdown', ev => { ev.stopPropagation(); restore(g); });
+    goneEl.appendChild(d);
+  });
+}
+
+async function restore(g) {
+  // Putting a mark back is a NEW judgment that supersedes the removal, never an edit
+  // of it: the log is append-only and both entries stay readable (D47).
+  const said = document.getElementById('said');
+  said.className = 'said'; said.textContent = 'restoring…';
+  try {
+    const r = await fetch('adjudicate', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        item_id: 'restore:p' + sel.value + ':' + g.numeral,
+        kind: 'confirm', target: {page: Number(sel.value), numeral: g.numeral},
+        box_px: null, supersedes: g.adj_id,
+        note: 'reviewer put this mark back after removing it'})
+    });
+    const d = await r.json();
+    if (d.error) { said.className = 'said bad'; said.textContent = d.error; return; }
+    said.className = 'said ok';
+    said.textContent = 'restored — refresh to see it back on the sheet.';
+  } catch (e) {
+    said.className = 'said bad';
+    said.textContent = 'no review server — start scripts/serve_console.py';
+  }
+}
+
+document.getElementById('showgone').addEventListener('change', drawGone);
 document.getElementById('show').addEventListener('change', drawMarks);
 document.getElementById('deselect').addEventListener('click', deselect);
 
@@ -233,9 +289,9 @@ document.getElementById('doCorrect').addEventListener('click', () => {
 function loadSheet() {
   const o = sel.selectedOptions[0];
   if (o && o.dataset.file) img.src = 'sheets/' + o.dataset.file;
-  clearBox(); deselect(); drawMarks();
+  clearBox(); deselect(); drawMarks(); drawGone();
 }
-img.addEventListener('load', drawMarks);
+img.addEventListener('load', () => { drawMarks(); drawGone(); });
 function clearBox() { box = null; rect.style.display = 'none'; save.disabled = true; }
 sel.addEventListener('change', loadSheet);
 document.getElementById('clear').addEventListener('click', clearBox);
