@@ -258,6 +258,27 @@ def default_registry(
             ["doc_id", "start", "end"],
         ))
 
+    def _lint_question(a: dict) -> dict:
+        from .locator import units_for
+        from .question_lint import lint
+        from .retrieval import tokenize
+        vocab: set[str] = set()
+        units: list = []
+        for d in doc_store.list_docs():
+            doc = doc_store.load(d)
+            vocab |= set(tokenize(doc.canonical_text))
+            units += units_for(doc)
+        return {"findings": [{"kind": f.kind, "message": f.message,
+                              "terms": list(f.terms)}
+                             for f in lint(a["question"], vocabulary=frozenset(vocab),
+                                           units=units)]}
+
+    reg("lint_question", "Checks a question against this corpus BEFORE it is run — "
+        "terms no passage contains, a unit the document lacks, a request for a legal "
+        "conclusion, two questions in one. Advisory: it flags and never rewrites, and "
+        "the question as asked is what gets answered and recorded (D83).",
+        _lint_question, _obj({"question": _TEXT}, ["question"]))
+
     reg("get_document", "Full hash-verified canonical text — read freely (D11). Returns "
         "the content_hash to bind with.",
         lambda a: {"doc_id": a["doc_id"], "text": span_store.get_document(a["doc_id"]),

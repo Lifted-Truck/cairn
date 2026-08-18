@@ -73,6 +73,12 @@ button:disabled{opacity:.55;cursor:default}
 .span.near{border-left-color:var(--mut);opacity:.9}
 .err{background:var(--warnbg);color:var(--warn);padding:11px 14px;border-radius:7px;
  font-size:13.5px}
+.note-flag{background:var(--panel);border:1px solid var(--rule);
+ border-left:3px solid var(--warn);border-radius:8px;padding:10px 13px;margin:0 0 9px;
+ font-size:13px;color:var(--ink)}
+.note-flag b{display:block;text-transform:uppercase;letter-spacing:.05em;
+ font-size:10.5px;color:var(--warn);margin-bottom:3px}
+.note-flag .terms{display:block;margin-top:5px;font:12px var(--mono);color:var(--mut)}
 .note{margin-top:26px;padding-top:14px;border-top:1px solid var(--rule);
  font-size:12.5px;color:var(--mut);max-width:70ch}
 </style>
@@ -145,6 +151,23 @@ document.getElementById('f').addEventListener('submit', async ev => {
   btn.disabled = true;
   out.innerHTML = '<p class="hint">locating…</p>';
   try {
+    // Lint and search together: the findings explain a thin result before the reviewer
+    // has to guess at one. Advisory only — the query runs either way (D83).
+    let notes = '';
+    try {
+      const lr = await fetch('tool/lint_question', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({question: q})
+      });
+      const ld = await lr.json();
+      notes = (ld.findings || []).map(f =>
+        '<div class="note-flag"><b>' + esc(f.kind.replace(/_/g, ' ')) + '</b>' +
+        esc(f.message) +
+        (f.terms && f.terms.length
+          ? '<span class="terms">' + f.terms.map(esc).join(' · ') + '</span>' : '') +
+        '</div>').join('');
+    } catch (e) { /* the linter is advice; its absence must never block a search */ }
+
     const r = await fetch('tool/search_corpus', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({query: q, k: 20})
@@ -153,13 +176,13 @@ document.getElementById('f').addEventListener('submit', async ev => {
     if (d.error) { out.innerHTML = '<div class="err">' + esc(d.error) + '</div>'; return; }
     const hits = d.hits || [];
     if (!hits.length) {
-      out.innerHTML = '<div class="verdict"><b>No passage contains these terms.</b>' +
+      out.innerHTML = notes + '<div class="verdict"><b>No passage contains these terms.</b>' +
         'Matching is on exact words \u2014 there is no stemming, so <i>magnetron</i> ' +
         'finds nothing while <i>magnetrons</i> finds three passages. Try the ' +
         'specification\u2019s own wording, including its plurals.</div>';
       return;
     }
-    let html = '<div class="verdict"><b>' + hits.length + ' passage(s), best first</b>' +
+    let html = notes + '<div class="verdict"><b>' + hits.length + ' passage(s), best first</b>' +
       'Ranked by term overlap (BM25). This is a search, not a judgment \u2014 nothing ' +
       'here decides whether a passage answers your question.</div>';
     html += (await Promise.all(hits.map(h => spanCard(h, false)))).join('');
