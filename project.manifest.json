@@ -1,6 +1,6 @@
 {
   "schema": "project-manifest.0 (draft — kit v2 will formalize)",
-  "kit_version": "2.4.1",
+  "kit_version": "2.5.0",
   "status": "RATIFIED 2026-06-24 (M0 scaffold merged); contract 2.0 as of 2026-08-09",
   "survey": {
     "what_is_it": "library/tooling — grounded-retrieval tools (MCP server + CLI) an agent calls: ground or abstain, never invent. Cairn makes no model calls on the deciding path.",

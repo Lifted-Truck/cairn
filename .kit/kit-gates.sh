@@ -39,6 +39,14 @@ record() { # record <target> <exit_code>
 # before `git add` then passes, and CI fails after the commit lands — which is
 # exactly how the first version of this gate shipped its own leak. Untracked
 # but not-gitignored == about to be committed, so scan it.
+# KNOWN FALSE POSITIVES (substack2pdf, 2026-08-18): the pattern is a PATH shape,
+# not a hostname check, so a URL whose path happens to read /home/<segment>/ or
+# /Users/<segment>/ trips it — Substack reader URLs are the found case. That is
+# correct conservative behaviour, not a bug: the gate cannot tell a URL path
+# from a filesystem path without knowing intent. Prefer REWORDING the prose to
+# allowlisting the file (two repos have now chosen reword), because an
+# allowlist entry blinds the gate to that whole file forever, while a reword
+# costs one sentence.
 # Allowlist: security docs legitimately CONTAIN the patterns (they are docs
 # ABOUT leaks). `.leakcheck-allow` lists exempt paths/globs, one per line
 # (# comments ok). Exemptions are commits too — justify sensitive ones in
