@@ -87,8 +87,14 @@ leak_gate() {
   # purpose — this gate greps itself, and a literal here matches itself
   # (spectral-morph-001 found exactly that trap). Kept byte-identical to
   # autonomous/verify and governor/leak_scan.py: three detectors, one policy.
-  hits=$(git grep --untracked -nIE '/(Users|home)/[^/]+/|[A-Za-z]:\\+Users\\+[^\\]' -- . "${excludes[@]}" 2>/dev/null \
-         | grep -vE '/(Users|home)/[<$@{%]|[A-Za-z]:\\+Users\\+[<$@{%]' || true)
+  # Third alternative (kit 2.7.0, horde brief hypersaw-004): the DASH-encoded
+  # home path Claude Code uses for session and project folders, where every
+  # slash became a dash. An agent quoting its scratchpad path writes the
+  # username into tracked text in that form, and the slash patterns above
+  # cannot see it. Anchored to a path or word boundary so ordinary hyphenated
+  # prose does not match; placeholders (`<user>`, `$USER`, ...) still pass.
+  hits=$(git grep --untracked -nIE '/(Users|home)/[^/]+/|[A-Za-z]:\\+Users\\+[^\\]|(^|[/[:space:](=])-(Users|home)-[^-/[:space:]]+-' -- . "${excludes[@]}" 2>/dev/null \
+         | grep -vE '/(Users|home)/[<$@{%]|[A-Za-z]:\\+Users\\+[<$@{%]|-(Users|home)-[<$@{%]' || true)
   [ -z "$hits" ] && return 0
   echo "verify: LEAK — machine-absolute path in a tracked file (use ~/ instead):" >&2
   echo "$hits" | sed 's/^/    /' >&2

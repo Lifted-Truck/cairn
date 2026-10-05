@@ -1,4 +1,4 @@
-kit_version: 2.5.0
+kit_version: 2.7.0
 # KIT-OWNED. Written by kit_sync.py — do not hand-edit these files.
 # ./verify recomputes these hashes and goes red if they disagree.
-7b399715c3d63dff659a4d0a55bec735a1e997dc83402371efaf5bc0b1ce9468  kit-gates.sh
+3e8995314d5b22809e75e1cf4f7c872d36b623beaad65d1becf5237791e22ad1  kit-gates.sh
